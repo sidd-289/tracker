@@ -5,11 +5,11 @@ import { BodyCustomCode, renderHeadCustomCode } from '@/lib/make-custom-code'
 import { makeSiteSettings, sanitizeHtmlAttribute } from '@/lib/make-site-settings'
 import './styles.css'
 
-const defaultTitle = 'Manager Desk'
+const defaultTitle = 'Jans Desk'
 const title = makeSiteSettings.title ?? defaultTitle
 const description =
   makeSiteSettings.description ??
-  'A calm personal notes, diary, command, tracker, and manager workspace.'
+  'A calm personal notes, diary, command, learning, proof-of-work, tracker, and Jans workspace.'
 const favicon = makeSiteSettings.icons?.icon ?? '/favicon.svg'
 const socialImage = makeSiteSettings.openGraph?.image
 const googleAnalyticsId = sanitizeHtmlAttribute(makeSiteSettings.analytics?.googleAnalyticsId)

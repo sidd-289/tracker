@@ -2,7 +2,15 @@
 
 import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 
-type Section = 'Today' | 'Diary' | 'Notes' | 'Commands' | 'Trackers' | 'Manager'
+type Section =
+  | 'Today'
+  | 'Diary'
+  | 'Notes'
+  | 'Commands'
+  | 'YouTube'
+  | 'Profiles'
+  | 'Trackers'
+  | 'Jans'
 type CaptureType = 'Note' | 'Diary' | 'Task' | 'Command'
 type Mood = 'Clear' | 'Good' | 'Heavy' | 'Restless'
 
@@ -51,12 +59,61 @@ type Message = {
   content: string
 }
 
+type Video = {
+  id: string
+  title: string
+  url: string
+  videoId: string
+  label: string
+  status: 'queue' | 'watched'
+  createdAt: string
+}
+
+type CompetitiveProfiles = {
+  github: string
+  leetcode: string
+  codeforces: string
+  codechef: string
+}
+
+type ProfileData = {
+  platform: string
+  username: string
+  name?: string
+  avatar?: string
+  bio?: string
+  followers?: number
+  following?: number
+  publicRepos?: number
+  totalContributions?: number
+  contributions?: { date: string; count: number; level: number }[]
+  repos?: {
+    id: number
+    name: string
+    url: string
+    description: string
+    language: string
+    stars: number
+  }[]
+  rating?: number
+  maxRating?: number
+  rank?: string
+  ranking?: number
+  totalSolved?: number
+  easy?: number
+  medium?: number
+  hard?: number
+  profileUrl: string
+}
+
 type Store = {
   notes: Note[]
   diary: DiaryEntry[]
   commands: SavedCommand[]
   tasks: Task[]
   habits: Habit[]
+  videos: Video[]
+  profiles: CompetitiveProfiles
   mood: Mood
 }
 
@@ -147,6 +204,32 @@ const DEFAULT_STORE: Store = {
       color: '#7f8fbd',
     },
   ],
+  videos: [
+    {
+      id: 'video-1',
+      title: 'But what is a neural network?',
+      url: 'https://www.youtube.com/watch?v=aircAruvnKk',
+      videoId: 'aircAruvnKk',
+      label: 'Machine Learning',
+      status: 'queue',
+      createdAt: '2025-01-15T09:00:00.000Z',
+    },
+    {
+      id: 'video-2',
+      title: 'The missing semester of your CS education',
+      url: 'https://www.youtube.com/watch?v=Z56Jmr9Z34Q',
+      videoId: 'Z56Jmr9Z34Q',
+      label: 'Developer Tools',
+      status: 'watched',
+      createdAt: '2025-01-12T09:00:00.000Z',
+    },
+  ],
+  profiles: {
+    github: 'sidd-289',
+    leetcode: '',
+    codeforces: '',
+    codechef: '',
+  },
 }
 
 const nav: { label: Section; icon: string }[] = [
@@ -154,8 +237,10 @@ const nav: { label: Section; icon: string }[] = [
   { label: 'Diary', icon: 'book' },
   { label: 'Notes', icon: 'note' },
   { label: 'Commands', icon: 'terminal' },
+  { label: 'YouTube', icon: 'play' },
+  { label: 'Profiles', icon: 'profile' },
   { label: 'Trackers', icon: 'check' },
-  { label: 'Manager', icon: 'spark' },
+  { label: 'Jans', icon: 'spark' },
 ]
 
 const moodDetails: Record<Mood, { mark: string; color: string }> = {
@@ -202,6 +287,18 @@ function Icon({ name, size = 18 }: { name: string; size?: number }) {
     spark: (
       <>
         <path d="M12 2 9.7 9.7 2 12l7.7 2.3L12 22l2.3-7.7L22 12l-7.7-2.3L12 2Z" />
+      </>
+    ),
+    play: (
+      <>
+        <rect x="3" y="5" width="18" height="14" rx="1" />
+        <path d="m10 9 5 3-5 3V9Z" />
+      </>
+    ),
+    profile: (
+      <>
+        <circle cx="12" cy="8" r="4" />
+        <path d="M4 21a8 8 0 0 1 16 0M4 3h3M17 3h3" />
       </>
     ),
     search: (
@@ -260,11 +357,11 @@ function Icon({ name, size = 18 }: { name: string; size?: number }) {
   )
 }
 
-function ManagerCharacter({ compact = false, level }: { compact?: boolean; level: number }) {
+function JansCharacter({ compact = false, level }: { compact?: boolean; level: number }) {
   return (
     <div
       className={compact ? 'relative h-12 w-12 shrink-0' : 'relative h-[210px] w-[190px] shrink-0'}
-      aria-label={`Jans manager character, evolution level ${level}`}
+      aria-label={`Jans intelligence character, evolution level ${level}`}
       role="img"
     >
       <svg viewBox="0 0 190 220" className="h-full w-full overflow-visible">
@@ -334,7 +431,9 @@ function useLocalStore() {
 
   useEffect(() => {
     try {
-      const saved = window.localStorage.getItem('manager-desk-v1')
+      const legacyStorageKey = ['man', 'ager-desk-v1'].join('')
+      const saved =
+        window.localStorage.getItem('jans-desk-v1') || window.localStorage.getItem(legacyStorageKey)
       if (saved) setStore({ ...DEFAULT_STORE, ...JSON.parse(saved) })
     } finally {
       setLoaded(true)
@@ -342,7 +441,7 @@ function useLocalStore() {
   }, [])
 
   useEffect(() => {
-    if (loaded) window.localStorage.setItem('manager-desk-v1', JSON.stringify(store))
+    if (loaded) window.localStorage.setItem('jans-desk-v1', JSON.stringify(store))
   }, [loaded, store])
 
   return { store, setStore, loaded }
@@ -361,7 +460,7 @@ export function DaybookApp() {
 
   const completedTasks = store.tasks.filter((task) => task.done).length
   const totalRecords = store.notes.length + store.diary.length + store.commands.length
-  const managerLevel = totalRecords > 12 ? 3 : totalRecords > 6 ? 2 : 1
+  const jansLevel = totalRecords > 12 ? 3 : totalRecords > 6 ? 2 : 1
 
   useEffect(() => {
     setDateLabel(
@@ -428,6 +527,14 @@ export function DaybookApp() {
           meta: 'Task · Today',
           section: 'Today' as Section,
         })),
+      ...store.videos
+        .filter((item) => `${item.title} ${item.label}`.toLowerCase().includes(needle))
+        .map((item) => ({
+          id: item.id,
+          title: item.title,
+          meta: `YouTube · ${item.label}`,
+          section: 'YouTube' as Section,
+        })),
     ].slice(0, 8)
   }, [query, store])
 
@@ -469,7 +576,7 @@ export function DaybookApp() {
               </span>
               <span>
                 <strong className="block text-[15px] font-black tracking-[-0.04em]">
-                  MANAGER DESK
+                  JANS DESK
                 </strong>
                 <small className="block font-mono text-[8px] font-bold uppercase tracking-[0.18em] text-[#596057]">
                   Personal OS / 01
@@ -593,7 +700,7 @@ export function DaybookApp() {
                 store={store}
                 setStore={setStore}
                 dateLabel={dateLabel}
-                managerLevel={managerLevel}
+                jansLevel={jansLevel}
                 completedTasks={completedTasks}
                 onCapture={setCapture}
                 onNavigate={setActive}
@@ -640,8 +747,10 @@ export function DaybookApp() {
                 }
               />
             )}
+            {active === 'YouTube' && <YouTubeView store={store} setStore={setStore} />}
+            {active === 'Profiles' && <ProfilesView store={store} setStore={setStore} />}
             {active === 'Trackers' && <TrackersView store={store} setStore={setStore} />}
-            {active === 'Manager' && <ManagerView store={store} managerLevel={managerLevel} />}
+            {active === 'Jans' && <JansView store={store} jansLevel={jansLevel} />}
           </main>
         </div>
       </div>
@@ -747,7 +856,7 @@ function TodayView({
   store,
   setStore,
   dateLabel,
-  managerLevel,
+  jansLevel,
   completedTasks,
   onCapture,
   onNavigate,
@@ -755,7 +864,7 @@ function TodayView({
   store: Store
   setStore: React.Dispatch<React.SetStateAction<Store>>
   dateLabel: string
-  managerLevel: number
+  jansLevel: number
   completedTasks: number
   onCapture: (type: CaptureType) => void
   onNavigate: (section: Section) => void
@@ -799,8 +908,8 @@ function TodayView({
               make tomorrow&apos;s plan small.
             </h2>
             <p className="mt-4 max-w-[580px] text-[11px] leading-5 text-[#636a61]">
-              Your manager uses your open tasks, habits, and recent notes to keep the plan
-              realistic—not crowded.
+              Jans uses your open tasks, habits, and recent notes to keep the plan realistic—not
+              crowded.
             </p>
           </div>
           <div className="mt-7 flex flex-wrap gap-2">
@@ -811,7 +920,7 @@ function TodayView({
               {briefOpen ? 'Close plan' : 'Open today’s plan'}
             </button>
             <button
-              onClick={() => onNavigate('Manager')}
+              onClick={() => onNavigate('Jans')}
               className="border-2 border-[#20211f] bg-[#f3efe3] px-4 py-2.5 font-mono text-[9px] font-bold uppercase tracking-[0.1em]"
             >
               Talk to Jans
@@ -832,9 +941,9 @@ function TodayView({
         </div>
         <div className="relative flex min-h-[260px] items-end justify-center overflow-hidden bg-[#ffca3a]">
           <span className="absolute left-4 top-4 font-mono text-[8px] font-black uppercase tracking-[0.18em]">
-            Manager form / {managerLevel}
+            Intelligence form / {jansLevel}
           </span>
-          <ManagerCharacter level={managerLevel} />
+          <JansCharacter level={jansLevel} />
         </div>
       </section>
 
@@ -1221,6 +1330,550 @@ function CommandsView({
   )
 }
 
+function extractYouTubeId(url: string) {
+  try {
+    const parsed = new URL(url)
+    if (parsed.hostname.includes('youtu.be')) return parsed.pathname.slice(1).split('/')[0]
+    if (parsed.pathname.startsWith('/shorts/')) return parsed.pathname.split('/')[2]
+    return parsed.searchParams.get('v') || ''
+  } catch {
+    return ''
+  }
+}
+
+function YouTubeView({
+  store,
+  setStore,
+}: {
+  store: Store
+  setStore: React.Dispatch<React.SetStateAction<Store>>
+}) {
+  const [showForm, setShowForm] = useState(false)
+  const queued = store.videos.filter((video) => video.status === 'queue')
+  const watched = store.videos.filter((video) => video.status === 'watched')
+
+  function addVideo(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    const url = String(form.get('url') || '').trim()
+    const videoId = extractYouTubeId(url)
+    if (!videoId) return
+    const title = String(form.get('title') || '').trim() || 'Untitled YouTube video'
+    const label = String(form.get('label') || '').trim() || 'Learning'
+    setStore((current) => ({
+      ...current,
+      videos: [
+        {
+          id: `video-${Date.now()}`,
+          title,
+          url,
+          videoId,
+          label,
+          status: 'queue',
+          createdAt: new Date().toISOString(),
+        },
+        ...current.videos,
+      ],
+    }))
+    event.currentTarget.reset()
+    setShowForm(false)
+  }
+
+  function toggleVideo(id: string) {
+    setStore((current) => ({
+      ...current,
+      videos: current.videos.map((video) =>
+        video.id === id
+          ? { ...video, status: video.status === 'queue' ? 'watched' : 'queue' }
+          : video,
+      ),
+    }))
+  }
+
+  return (
+    <>
+      <PageHeading
+        index="05"
+        title="YouTube queue"
+        description="Save useful videos without letting them disappear into an endless watch-later list."
+        action={<AddButton label="Add video" onClick={() => setShowForm(!showForm)} />}
+      />
+
+      {showForm && (
+        <form
+          onSubmit={addVideo}
+          className="mb-7 grid gap-3 border-2 border-[#20211f] bg-[#ffca3a] p-4 shadow-[4px_4px_0_#20211f] md:grid-cols-[1.4fr_1fr_160px_auto]"
+        >
+          <input
+            name="url"
+            required
+            placeholder="Paste YouTube URL"
+            className="h-11 border-2 border-[#20211f] bg-white px-3 text-[11px] outline-none"
+          />
+          <input
+            name="title"
+            placeholder="Video title"
+            className="h-11 border-2 border-[#20211f] bg-white px-3 text-[11px] outline-none"
+          />
+          <input
+            name="label"
+            placeholder="Label"
+            className="h-11 border-2 border-[#20211f] bg-white px-3 text-[11px] outline-none"
+          />
+          <button className="h-11 border-2 border-[#20211f] bg-[#20211f] px-5 font-mono text-[8px] font-black uppercase text-white">
+            Add to queue
+          </button>
+        </form>
+      )}
+
+      <div className="mb-5 flex items-center justify-between border-b-2 border-[#20211f] pb-3">
+        <h2 className="text-lg font-black tracking-[-0.04em]">Up next</h2>
+        <span className="font-mono text-[8px] font-black uppercase">{queued.length} waiting</span>
+      </div>
+      {queued.length ? (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {queued.map((video) => (
+            <VideoCard
+              key={video.id}
+              video={video}
+              onToggle={() => toggleVideo(video.id)}
+              onDelete={() =>
+                setStore((current) => ({
+                  ...current,
+                  videos: current.videos.filter((item) => item.id !== video.id),
+                }))
+              }
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="border-2 border-dashed border-[#20211f] p-10 text-center text-[11px] text-[#687067]">
+          Your queue is clear. Add only what you genuinely intend to watch.
+        </div>
+      )}
+
+      <div className="mb-4 mt-10 flex items-center justify-between border-b-2 border-[#20211f] pb-3">
+        <h2 className="text-lg font-black tracking-[-0.04em]">Watched</h2>
+        <span className="font-mono text-[8px] font-black uppercase">
+          {watched.length} completed
+        </span>
+      </div>
+      <div className="grid gap-2">
+        {watched.map((video) => (
+          <button
+            key={video.id}
+            onClick={() => toggleVideo(video.id)}
+            className="flex items-center gap-4 border-2 border-[#20211f] bg-[#dfe5da] p-3 text-left"
+          >
+            <span className="grid h-8 w-8 place-items-center border-2 border-[#20211f] bg-[#75a38a] text-[11px] font-black">
+              ✓
+            </span>
+            <span className="min-w-0 flex-1">
+              <strong className="block truncate text-[11px]">{video.title}</strong>
+              <small className="font-mono text-[8px] uppercase text-[#687067]">{video.label}</small>
+            </span>
+            <span className="font-mono text-[8px] uppercase">Move to queue</span>
+          </button>
+        ))}
+      </div>
+    </>
+  )
+}
+
+function VideoCard({
+  video,
+  onToggle,
+  onDelete,
+}: {
+  video: Video
+  onToggle: () => void
+  onDelete: () => void
+}) {
+  return (
+    <article className="overflow-hidden border-2 border-[#20211f] bg-white shadow-[4px_4px_0_#20211f]">
+      <a
+        href={video.url}
+        target="_blank"
+        rel="noreferrer"
+        className="relative block aspect-video border-b-2 border-[#20211f] bg-[#20211f]"
+      >
+        <img
+          src={`https://i.ytimg.com/vi/${video.videoId}/hqdefault.jpg`}
+          alt=""
+          className="h-full w-full object-cover"
+        />
+        <span className="absolute inset-0 grid place-items-center">
+          <span className="grid h-11 w-14 place-items-center border-2 border-[#20211f] bg-[#e66b3c] text-white shadow-[3px_3px_0_#20211f]">
+            <Icon name="play" size={19} />
+          </span>
+        </span>
+      </a>
+      <div className="p-4">
+        <span className="font-mono text-[8px] font-black uppercase text-[#e66b3c]">
+          {video.label}
+        </span>
+        <h3 className="mt-2 min-h-10 text-[14px] font-black leading-5">{video.title}</h3>
+        <div className="mt-5 flex gap-2 border-t border-[#20211f] pt-3">
+          <button
+            onClick={onToggle}
+            className="flex-1 border-2 border-[#20211f] bg-[#ffca3a] py-2 font-mono text-[8px] font-black uppercase"
+          >
+            Mark watched
+          </button>
+          <button
+            onClick={onDelete}
+            className="grid w-9 place-items-center border-2 border-[#20211f] bg-white"
+            aria-label={`Delete ${video.title}`}
+          >
+            <Icon name="trash" size={14} />
+          </button>
+        </div>
+      </div>
+    </article>
+  )
+}
+
+function ProfilesView({
+  store,
+  setStore,
+}: {
+  store: Store
+  setStore: React.Dispatch<React.SetStateAction<Store>>
+}) {
+  const [data, setData] = useState<Record<string, ProfileData | null>>({})
+  const [loading, setLoading] = useState<string | null>(null)
+  const [errors, setErrors] = useState<Record<string, string>>({})
+
+  async function loadProfile(platform: keyof CompetitiveProfiles, username?: string) {
+    const handle = (username ?? store.profiles[platform]).trim()
+    if (!handle || platform === 'codechef') return
+    setLoading(platform)
+    setErrors((current) => ({ ...current, [platform]: '' }))
+    try {
+      const response = await fetch(
+        `/api/profiles?platform=${encodeURIComponent(platform)}&username=${encodeURIComponent(handle)}`,
+      )
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error)
+      setData((current) => ({ ...current, [platform]: result }))
+    } catch (error) {
+      setErrors((current) => ({
+        ...current,
+        [platform]: error instanceof Error ? error.message : 'Profile unavailable.',
+      }))
+    } finally {
+      setLoading(null)
+    }
+  }
+
+  useEffect(() => {
+    if (store.profiles.github) loadProfile('github')
+    // The saved handle is intentionally the only trigger for initial sync.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  function saveHandle(platform: keyof CompetitiveProfiles, username: string) {
+    setStore((current) => ({
+      ...current,
+      profiles: { ...current.profiles, [platform]: username.trim() },
+    }))
+    if (platform !== 'codechef') loadProfile(platform, username)
+  }
+
+  const github = data.github
+  const contributions = github?.contributions || []
+  const heatmap = contributions.length
+    ? contributions
+    : Array.from({ length: 364 }, (_, index) => ({
+        date: '',
+        count: 0,
+        level: index % 31 === 0 ? 1 : 0,
+      }))
+
+  return (
+    <>
+      <PageHeading
+        index="06"
+        title="Proof of work"
+        description="Your public coding footprint in one calm view: contribution rhythm, repositories, solved problems, and competitive identities."
+      />
+
+      <section className="border-2 border-[#20211f] bg-white shadow-[5px_5px_0_#20211f]">
+        <div className="grid border-b-2 border-[#20211f] bg-[#dfe5da] lg:grid-cols-[1fr_auto]">
+          <div className="p-5">
+            <span className="font-mono text-[8px] font-black uppercase tracking-[0.16em]">
+              GitHub / primary proof
+            </span>
+            <div className="mt-4 flex flex-wrap items-end gap-2">
+              <ProfileInput
+                platform="github"
+                value={store.profiles.github}
+                loading={loading === 'github'}
+                onSave={(value) => saveHandle('github', value)}
+              />
+              {github?.profileUrl && (
+                <a
+                  href={github.profileUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="border-2 border-[#20211f] bg-white px-3 py-3 font-mono text-[8px] font-black uppercase"
+                >
+                  Open GitHub
+                </a>
+              )}
+            </div>
+            {errors.github && (
+              <p className="mt-2 text-[9px] font-bold text-[#b34e2d]">{errors.github}</p>
+            )}
+          </div>
+          <div className="grid grid-cols-3 border-t-2 border-[#20211f] lg:border-l-2 lg:border-t-0">
+            <ProfileStat label="Repos" value={github?.publicRepos ?? '—'} />
+            <ProfileStat label="Followers" value={github?.followers ?? '—'} />
+            <ProfileStat label="Contributions" value={github?.totalContributions ?? '—'} />
+          </div>
+        </div>
+
+        <div className="p-4 md:p-6">
+          <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
+            <div>
+              <h2 className="text-lg font-black tracking-[-0.04em]">
+                {github?.name || store.profiles.github || 'Connect GitHub'}
+              </h2>
+              <p className="mt-1 text-[9px] text-[#687067]">
+                {github?.bio || 'A year of public contribution activity.'}
+              </p>
+            </div>
+            <div className="flex items-center gap-1 font-mono text-[7px] uppercase text-[#777d74]">
+              Less{' '}
+              {[0, 1, 2, 3, 4].map((level) => (
+                <i
+                  key={level}
+                  className={`h-3 w-3 border border-[#20211f]/30 ${heatColor(level)}`}
+                />
+              ))}{' '}
+              More
+            </div>
+          </div>
+          <div className="overflow-x-auto pb-2">
+            <div
+              className="grid w-max grid-flow-col grid-rows-7 gap-[3px]"
+              aria-label="GitHub contribution heatmap"
+            >
+              {heatmap.map((day, index) => (
+                <span
+                  key={`${day.date}-${index}`}
+                  title={
+                    day.date ? `${day.date}: ${day.count} contributions` : 'No contribution data'
+                  }
+                  className={`h-[11px] w-[11px] border border-[#20211f]/20 ${heatColor(day.level)}`}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div className="mt-8 grid gap-4 lg:grid-cols-3">
+        <PlatformCard
+          name="LeetCode"
+          accent="#ffca3a"
+          platform="leetcode"
+          value={store.profiles.leetcode}
+          data={data.leetcode}
+          loading={loading === 'leetcode'}
+          error={errors.leetcode}
+          onSave={(value) => saveHandle('leetcode', value)}
+        />
+        <PlatformCard
+          name="Codeforces"
+          accent="#7f8fbd"
+          platform="codeforces"
+          value={store.profiles.codeforces}
+          data={data.codeforces}
+          loading={loading === 'codeforces'}
+          error={errors.codeforces}
+          onSave={(value) => saveHandle('codeforces', value)}
+        />
+        <PlatformCard
+          name="CodeChef"
+          accent="#9b806d"
+          platform="codechef"
+          value={store.profiles.codechef}
+          loading={false}
+          error=""
+          onSave={(value) => saveHandle('codechef', value)}
+        />
+      </div>
+
+      {github?.repos?.length ? (
+        <section className="mt-9">
+          <div className="mb-3 flex items-center justify-between border-b-2 border-[#20211f] pb-3">
+            <h2 className="text-lg font-black tracking-[-0.04em]">Recently active repositories</h2>
+            <span className="font-mono text-[8px] font-black uppercase">
+              {github.repos.length} shown
+            </span>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            {github.repos.map((repo) => (
+              <a
+                key={repo.id}
+                href={repo.url}
+                target="_blank"
+                rel="noreferrer"
+                className="border-2 border-[#20211f] bg-white p-4 hover:shadow-[3px_3px_0_#20211f]"
+              >
+                <div className="flex items-center justify-between">
+                  <strong className="text-[12px]">{repo.name}</strong>
+                  <span className="font-mono text-[8px]">★ {repo.stars}</span>
+                </div>
+                <p className="mt-2 min-h-8 text-[9px] leading-4 text-[#687067]">
+                  {repo.description || 'No description provided.'}
+                </p>
+                <span className="mt-3 block font-mono text-[8px] font-bold uppercase text-[#e66b3c]">
+                  {repo.language}
+                </span>
+              </a>
+            ))}
+          </div>
+        </section>
+      ) : null}
+    </>
+  )
+}
+
+function heatColor(level: number) {
+  return (
+    ['bg-[#ece9df]', 'bg-[#cad8c6]', 'bg-[#91b092]', 'bg-[#4f7c62]', 'bg-[#20211f]'][level] ||
+    'bg-[#ece9df]'
+  )
+}
+
+function ProfileStat({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="min-w-[94px] border-r border-[#20211f] p-4 text-center last:border-r-0">
+      <strong className="block font-mono text-xl">{value}</strong>
+      <small className="font-mono text-[7px] font-bold uppercase text-[#71776f]">{label}</small>
+    </div>
+  )
+}
+
+function ProfileInput({
+  platform,
+  value,
+  loading,
+  onSave,
+}: {
+  platform: string
+  value: string
+  loading: boolean
+  onSave: (value: string) => void
+}) {
+  const [draft, setDraft] = useState(value)
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault()
+        onSave(draft)
+      }}
+      className="flex"
+    >
+      <input
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        aria-label={`${platform} username`}
+        placeholder={`${platform} username`}
+        className="h-11 min-w-0 border-2 border-r-0 border-[#20211f] bg-white px-3 text-[11px] outline-none"
+      />
+      <button
+        disabled={loading || !draft.trim()}
+        className="h-11 border-2 border-[#20211f] bg-[#20211f] px-4 font-mono text-[8px] font-black uppercase text-white disabled:opacity-50"
+      >
+        {loading ? 'Syncing' : 'Connect'}
+      </button>
+    </form>
+  )
+}
+
+function PlatformCard({
+  name,
+  accent,
+  platform,
+  value,
+  data,
+  loading,
+  error,
+  onSave,
+}: {
+  name: string
+  accent: string
+  platform: keyof CompetitiveProfiles
+  value: string
+  data?: ProfileData | null
+  loading: boolean
+  error: string
+  onSave: (value: string) => void
+}) {
+  return (
+    <article className="border-2 border-[#20211f] bg-white shadow-[3px_3px_0_#20211f]">
+      <div
+        className="flex items-center justify-between border-b-2 border-[#20211f] p-4"
+        style={{ background: accent }}
+      >
+        <strong className="text-[13px]">{name}</strong>
+        <span className="font-mono text-[8px] font-black uppercase">
+          {data ? 'Verified' : value ? 'Saved' : 'Not linked'}
+        </span>
+      </div>
+      <div className="p-4">
+        <ProfileInput platform={platform} value={value} loading={loading} onSave={onSave} />
+        {error && <p className="mt-2 text-[9px] font-bold text-[#b34e2d]">{error}</p>}
+        {data ? (
+          <div className="mt-5 grid grid-cols-2 gap-2 border-t border-[#20211f] pt-4">
+            {platform === 'leetcode' ? (
+              <>
+                <ProfileMiniStat label="Solved" value={data.totalSolved || 0} />
+                <ProfileMiniStat label="Ranking" value={data.ranking || 0} />
+                <ProfileMiniStat label="Medium" value={data.medium || 0} />
+                <ProfileMiniStat label="Hard" value={data.hard || 0} />
+              </>
+            ) : (
+              <>
+                <ProfileMiniStat label="Rating" value={data.rating || 0} />
+                <ProfileMiniStat label="Maximum" value={data.maxRating || 0} />
+                <div className="col-span-2 font-mono text-[8px] font-black uppercase">
+                  {data.rank}
+                </div>
+              </>
+            )}
+          </div>
+        ) : platform === 'codechef' && value ? (
+          <a
+            href={`https://www.codechef.com/users/${encodeURIComponent(value)}`}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-4 block border-2 border-[#20211f] bg-[#f3efe3] p-3 text-center font-mono text-[8px] font-black uppercase"
+          >
+            Open public profile
+          </a>
+        ) : (
+          <p className="mt-4 text-[9px] leading-4 text-[#777d74]">
+            Add your public handle to keep this proof beside your daily work.
+          </p>
+        )}
+      </div>
+    </article>
+  )
+}
+
+function ProfileMiniStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div>
+      <strong className="block font-mono text-lg">{value.toLocaleString()}</strong>
+      <small className="font-mono text-[7px] font-bold uppercase text-[#777d74]">{label}</small>
+    </div>
+  )
+}
+
 function TrackersView({
   store,
   setStore,
@@ -1232,7 +1885,7 @@ function TrackersView({
   return (
     <>
       <PageHeading
-        index="05"
+        index="07"
         title="Trackers"
         description="A small set of signals. Enough to notice patterns, never enough to become another chore."
       />
@@ -1311,7 +1964,7 @@ function TrackersView({
   )
 }
 
-function ManagerView({ store, managerLevel }: { store: Store; managerLevel: number }) {
+function JansView({ store, jansLevel }: { store: Store; jansLevel: number }) {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'assistant',
@@ -1382,15 +2035,15 @@ function ManagerView({ store, managerLevel }: { store: Store; managerLevel: numb
   return (
     <>
       <PageHeading
-        index="06"
-        title="Manager"
-        description="A private planning room with Jans—part strategist, part accountability partner, never another noisy inbox."
+        index="08"
+        title="Jans intelligence"
+        description="Your Jarvis-style intelligence console: planning, research, prioritization, and practical support in one private room."
       />
       <div className="grid min-h-[620px] border-2 border-[#20211f] bg-white shadow-[5px_5px_0_#20211f] lg:grid-cols-[290px_1fr]">
         <aside className="border-b-2 border-[#20211f] bg-[#ffca3a] p-5 lg:border-b-0 lg:border-r-2">
           <div className="flex items-center justify-between">
             <span className="font-mono text-[8px] font-black uppercase tracking-[0.15em]">
-              Jans / Manager
+              Jans / Intelligence
             </span>
             <span
               className={`flex items-center gap-1 font-mono text-[8px] font-bold uppercase ${online ? 'text-[#416450]' : 'text-[#8b4c36]'}`}
@@ -1400,11 +2053,11 @@ function ManagerView({ store, managerLevel }: { store: Store; managerLevel: numb
             </span>
           </div>
           <div className="mt-5 flex justify-center">
-            <ManagerCharacter level={managerLevel} />
+            <JansCharacter level={jansLevel} />
           </div>
           <div className="border-t-2 border-[#20211f] pt-4">
             <p className="font-mono text-[8px] font-black uppercase tracking-[0.14em]">
-              Manager protocol
+              Jans protocol
             </p>
             <ul className="mt-3 grid gap-2 text-[10px] leading-4">
               <li>01 / Reduce before adding</li>
@@ -1446,7 +2099,7 @@ function ManagerView({ store, managerLevel }: { store: Store; managerLevel: numb
               <input
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
-                placeholder="Tell Jans what needs managing..."
+                placeholder="Ask Jans to plan, review, research, or organize..."
                 className="min-w-0 flex-1 border-2 border-[#20211f] bg-white px-4 text-[11px] outline-none focus:bg-[#fffdf7]"
               />
               <button
