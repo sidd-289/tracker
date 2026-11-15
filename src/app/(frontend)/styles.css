@@ -1,23 +1,63 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
-.figma-custom-code-fragment {
-  display: contents;
+:root {
+  --ink: #20211f;
+  --paper: #f3efe3;
+  --sage: #dfe5da;
+  --yellow: #ffca3a;
+  --orange: #e66b3c;
 }
 
-.figma-bypass-link {
-  position: fixed;
-  top: 8px;
-  left: 8px;
-  z-index: 2147483647;
-  transform: translateY(-150%);
-  border-radius: 6px;
-  background: #111827;
-  color: #fff;
-  padding: 8px 12px;
-  font: 600 14px/1.2 system-ui, sans-serif;
-  text-decoration: none;
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    background: #e8e5dc;
+  }
+
+  body {
+    margin: 0;
+    min-width: 320px;
+    min-height: 100vh;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: Arial, Helvetica, sans-serif;
+    font-synthesis: none;
+  }
+
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  button:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible {
+    outline: 3px solid #7f8fbd;
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: var(--yellow);
+    color: var(--ink);
+  }
 }
 
-.figma-bypass-link:focus {
-  transform: translateY(0);
+@media (prefers-reduced-motion: no-preference) {
+  button,
+  article {
+    transition:
+      transform 150ms ease,
+      box-shadow 150ms ease,
+      background-color 150ms ease;
+  }
 }
