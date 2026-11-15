@@ -115,12 +115,71 @@ export async function GET(request: Request) {
     }
 
     if (platform === 'leetcode') {
+      try {
+        const query = `
+          query getUserProfile($username: String!) {
+            matchedUser(username: $username) {
+              username
+              profile {
+                ranking
+                userAvatar
+              }
+              submitStats: submitStatsGlobal {
+                acSubmissionNum {
+                  difficulty
+                  count
+                }
+              }
+            }
+          }
+        `
+        const leetRes = await fetch('https://leetcode.com/graphql', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
+          },
+          body: JSON.stringify({ query, variables: { username } }),
+          cache: 'no-store',
+          signal: AbortSignal.timeout(6000),
+        })
+
+        if (leetRes.ok) {
+          const json = await leetRes.json()
+          const user = json?.data?.matchedUser
+          if (user) {
+            const submissions = user.submitStats?.acSubmissionNum || []
+            const totalSolved = submissions.find((s: any) => s.difficulty === 'All')?.count || 0
+            const easy = submissions.find((s: any) => s.difficulty === 'Easy')?.count || 0
+            const medium = submissions.find((s: any) => s.difficulty === 'Medium')?.count || 0
+            const hard = submissions.find((s: any) => s.difficulty === 'Hard')?.count || 0
+
+            return Response.json({
+              platform: 'leetcode',
+              username: user.username,
+              ranking: user.profile?.ranking || 0,
+              avatar: user.profile?.userAvatar || '',
+              totalSolved,
+              easy,
+              medium,
+              hard,
+              profileUrl: `https://leetcode.com/u/${encodeURIComponent(user.username)}/`,
+            })
+          }
+        }
+      } catch {
+        // Fallback to proxy if direct GraphQL is unreachable
+      }
+
+      // Secondary Fallback via Alfa API
       const [solvedResponse, profileResponse] = await Promise.all([
         fetch(`https://alfa-leetcode-api.onrender.com/${encodeURIComponent(username)}/solved`, {
           cache: 'no-store',
+          signal: AbortSignal.timeout(8000),
         }),
         fetch(`https://alfa-leetcode-api.onrender.com/${encodeURIComponent(username)}`, {
           cache: 'no-store',
+          signal: AbortSignal.timeout(8000),
         }).catch(() => null),
       ])
       if (!solvedResponse.ok) {
@@ -138,6 +197,46 @@ export async function GET(request: Request) {
         medium: solved.mediumSolved || 0,
         hard: solved.hardSolved || 0,
         profileUrl: `https://leetcode.com/u/${encodeURIComponent(profile.username || username)}/`,
+      })
+    }
+
+    if (platform === 'codechef') {
+      const res = await fetch(`https://www.codechef.com/users/${encodeURIComponent(username)}`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
+        },
+        cache: 'no-store',
+        signal: AbortSignal.timeout(6000),
+      })
+
+      if (!res.ok) {
+        return Response.json({ error: 'CodeChef profile not found.' }, { status: 404 })
+      }
+
+      const html = await res.text()
+      const userExists =
+        html.includes(`"currentUser":"${username}"`) || html.includes('user-details-container')
+      if (!userExists) {
+        return Response.json({ error: 'CodeChef handle not found.' }, { status: 404 })
+      }
+
+      const ratingMatch =
+        html.match(/class="rating-number"[^>]*>\s*([0-9]+)\s*<\/div>/i) ||
+        html.match(/"rating":\s*"([0-9]+)"/)
+      const starCount = (html.match(/&#9733;|\u2605/g) || []).length
+      const starsVal = starCount > 0 ? `${starCount}★` : '1★'
+      const globalRankMatch = html.match(/global rank\s*([0-9]+)/i)
+      const rating = ratingMatch ? parseInt(ratingMatch[1], 10) : 0
+      const ranking = globalRankMatch ? parseInt(globalRankMatch[1], 10) : 0
+
+      return Response.json({
+        platform: 'codechef',
+        username,
+        rating,
+        rank: starsVal,
+        ranking,
+        avatar: '',
+        profileUrl: `https://www.codechef.com/users/${encodeURIComponent(username)}`,
       })
     }
 

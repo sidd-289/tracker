@@ -21,3 +21,14 @@ logs/
 # beside it.
 /.plugins/
 /.opencode-skills/
+
+# Local database and uploaded user PDFs
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Python virtual environment
+.venv/
+__pycache__/
+*.pyc

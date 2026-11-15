@@ -46,7 +46,11 @@ const nextConfig: NextConfig = {
   // so the Payload `/admin` panel renders blank in the preview iframe.
   // Dev-only - ignored by `next build`.
   //
-  allowedDevOrigins: makePublicPreviewOrigin ? [makePublicPreviewOrigin] : [],
+  allowedDevOrigins: [
+    ...(makePublicPreviewOrigin ? [makePublicPreviewOrigin] : []),
+    'siddhants-macbook-air.taile60ef3.ts.net',
+    '*.ts.net',
+  ],
   // Prerender source maps add ~100 MB per static build worker
   enablePrerenderSourceMaps: false,
   experimental: {
@@ -56,7 +60,11 @@ const nextConfig: NextConfig = {
     // browser origin is the public sandbox host while `x-forwarded-host` points
     // at the local dev server. Allow only that exact platform-provisioned host.
     serverActions: {
-      allowedOrigins: makePublicPreviewOrigin ? [makePublicPreviewOrigin] : [],
+      allowedOrigins: [
+        ...(makePublicPreviewOrigin ? [makePublicPreviewOrigin] : []),
+        'siddhants-macbook-air.taile60ef3.ts.net',
+        '*.ts.net',
+      ],
     },
   },
   env: {

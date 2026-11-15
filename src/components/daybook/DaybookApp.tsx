@@ -11,6 +11,7 @@ type Section =
   | 'Profiles'
   | 'Trackers'
   | 'Jans'
+  | 'Library'
 type CaptureType = 'Note' | 'Diary' | 'Task' | 'Command'
 type Mood = 'Clear' | 'Good' | 'Heavy' | 'Restless'
 
@@ -115,121 +116,40 @@ type Store = {
   videos: Video[]
   profiles: CompetitiveProfiles
   mood: Mood
+  craftsmanXp?: number
+  velocityXp?: number
+  knowledgeXp?: number
 }
 
 const DEFAULT_STORE: Store = {
   mood: 'Clear',
-  notes: [
-    {
-      id: 'note-1',
-      title: 'Ideas for a calmer week',
-      body: 'Protect the first hour. Group shallow work after lunch. Keep Friday open for review.',
-      label: 'Planning',
-      pinned: true,
-      createdAt: '2025-01-15T09:00:00.000Z',
-    },
-    {
-      id: 'note-2',
-      title: 'Things worth remembering',
-      body: 'Done is a decision, not a feeling. Make the next action obvious.',
-      label: 'Thoughts',
-      pinned: false,
-      createdAt: '2025-01-14T18:00:00.000Z',
-    },
-  ],
-  diary: [
-    {
-      id: 'diary-1',
-      title: 'A quieter start',
-      body: 'Left my phone away from the desk and let the morning arrive slowly. I finished the hard thing before opening messages.',
-      mood: 'Good',
-      createdAt: '2025-01-15T08:30:00.000Z',
-    },
-    {
-      id: 'diary-2',
-      title: 'Learning to leave space',
-      body: 'Not every open hour needs to become another task. The walk helped me return with a better answer.',
-      mood: 'Clear',
-      createdAt: '2025-01-13T20:20:00.000Z',
-    },
-  ],
-  commands: [
-    {
-      id: 'command-1',
-      name: 'Clean merged branches',
-      command: 'git branch --merged | grep -v "\\*" | xargs -n 1 git branch -d',
-      label: 'Git',
-      description: 'Remove local branches already merged into the current branch.',
-      favorite: true,
-    },
-    {
-      id: 'command-2',
-      name: 'Find large files',
-      command: 'find . -type f -size +20M -not -path "./.git/*"',
-      label: 'Shell',
-      description: 'List files larger than 20 MB while ignoring Git internals.',
-      favorite: false,
-    },
-    {
-      id: 'command-3',
-      name: 'Check listening ports',
-      command: 'ss -tulpn',
-      label: 'Network',
-      description: 'Show TCP and UDP ports currently listening.',
-      favorite: true,
-    },
-  ],
-  tasks: [
-    { id: 'task-1', title: 'Finish the tracker navigation', done: true, priority: 'High' },
-    { id: 'task-2', title: 'Review operating systems notes', done: false, priority: 'High' },
-    { id: 'task-3', title: 'Plan tomorrow before 8 PM', done: false, priority: 'Normal' },
-  ],
-  habits: [
-    {
-      id: 'habit-1',
-      name: 'Deep work',
-      days: [true, true, false, true, true, false, false],
-      color: '#e66b3c',
-    },
-    {
-      id: 'habit-2',
-      name: 'Read 10 pages',
-      days: [true, false, true, true, true, true, false],
-      color: '#75a38a',
-    },
-    {
-      id: 'habit-3',
-      name: 'Walk outside',
-      days: [true, true, true, false, true, false, false],
-      color: '#7f8fbd',
-    },
-  ],
-  videos: [
-    {
-      id: 'video-1',
-      title: 'But what is a neural network?',
-      url: 'https://www.youtube.com/watch?v=aircAruvnKk',
-      videoId: 'aircAruvnKk',
-      label: 'Machine Learning',
-      status: 'queue',
-      createdAt: '2025-01-15T09:00:00.000Z',
-    },
-    {
-      id: 'video-2',
-      title: 'The missing semester of your CS education',
-      url: 'https://www.youtube.com/watch?v=Z56Jmr9Z34Q',
-      videoId: 'Z56Jmr9Z34Q',
-      label: 'Developer Tools',
-      status: 'watched',
-      createdAt: '2025-01-12T09:00:00.000Z',
-    },
-  ],
+  craftsmanXp: 0,
+  velocityXp: 0,
+  knowledgeXp: 0,
+  notes: [],
+  diary: [],
+  commands: [],
+  tasks: [],
+  habits: [],
+  videos: [],
   profiles: {
     github: 'sidd-289',
     leetcode: '',
     codeforces: '',
     codechef: '',
   },
+}
+
+function normalizeProfiles(raw: any): CompetitiveProfiles {
+  if (!raw || typeof raw !== 'object') {
+    return { github: '', leetcode: '', codeforces: '', codechef: '' }
+  }
+  return {
+    github: typeof raw.github === 'string' ? raw.github : (typeof raw.github?.handle === 'string' ? raw.github.handle : ''),
+    leetcode: typeof raw.leetcode === 'string' ? raw.leetcode : (typeof raw.leetcode?.handle === 'string' ? raw.leetcode.handle : ''),
+    codeforces: typeof raw.codeforces === 'string' ? raw.codeforces : (typeof raw.codeforces?.handle === 'string' ? raw.codeforces.handle : ''),
+    codechef: typeof raw.codechef === 'string' ? raw.codechef : (typeof raw.codechef?.handle === 'string' ? raw.codechef.handle : ''),
+  }
 }
 
 const nav: { label: Section; icon: string }[] = [
@@ -241,6 +161,7 @@ const nav: { label: Section; icon: string }[] = [
   { label: 'Profiles', icon: 'profile' },
   { label: 'Trackers', icon: 'check' },
   { label: 'Jans', icon: 'spark' },
+  { label: 'Library', icon: 'file' },
 ]
 
 const moodDetails: Record<Mood, { mark: string; color: string }> = {
@@ -322,6 +243,14 @@ function Icon({ name, size = 18 }: { name: string; size?: number }) {
         <path d="M4 7h16M9 7V4h6v3M7 7l1 14h8l1-14M10 11v6M14 11v6" />
       </>
     ),
+    file: (
+      <>
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+        <polyline points="14 2 14 8 20 8" />
+        <line x1="16" y1="13" x2="8" y2="13" />
+        <line x1="16" y1="17" x2="8" y2="17" />
+      </>
+    ),
     clock: (
       <>
         <circle cx="12" cy="12" r="9" />
@@ -336,6 +265,25 @@ function Icon({ name, size = 18 }: { name: string; size?: number }) {
         <circle cx="5" cy="12" r="1.2" fill="currentColor" stroke="none" />
         <circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none" />
         <circle cx="19" cy="12" r="1.2" fill="currentColor" stroke="none" />
+      </>
+    ),
+    mic: (
+      <>
+        <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+        <path d="M19 10v1a7 7 0 0 1-14 0v-1M12 18v4M8 22h8" />
+      </>
+    ),
+    speaker: (
+      <>
+        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+        <path d="M15.54 8.46a5 5 0 0 1 0 7.07M19.07 4.93a10 10 0 0 1 0 14.14" />
+      </>
+    ),
+    speakerOff: (
+      <>
+        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+        <line x1="23" y1="9" x2="17" y2="15" />
+        <line x1="17" y1="9" x2="23" y2="15" />
       </>
     ),
   }
@@ -426,29 +374,124 @@ function JansCharacter({ compact = false, level }: { compact?: boolean; level: n
 }
 
 function useLocalStore() {
+  const [currentUser, setCurrentUser] = useState<'sidd' | 'jahnavi'>('sidd')
   const [store, setStore] = useState<Store>(DEFAULT_STORE)
   const [loaded, setLoaded] = useState(false)
 
+  // Initialize active user on mount (checks URL parameter ?user=jahnavi first, then localStorage)
   useEffect(() => {
     try {
-      const legacyStorageKey = ['man', 'ager-desk-v1'].join('')
+      const urlParams = new URLSearchParams(window.location.search)
+      const paramUser = urlParams.get('user')?.toLowerCase()
+      if (paramUser === 'jahnavi' || paramUser === 'sidd') {
+        setCurrentUser(paramUser)
+        window.localStorage.setItem('jans-active-user', paramUser)
+        return
+      }
+
+      const savedUser = window.localStorage.getItem('jans-active-user')
+      if (savedUser === 'jahnavi' || savedUser === 'sidd') {
+        setCurrentUser(savedUser)
+      }
+    } catch {}
+  }, [])
+
+  // Whenever currentUser changes, load state from local storage and sync with SQLite
+  useEffect(() => {
+    setLoaded(false)
+    const storageKey = `jans-desk-v1-${currentUser}`
+    try {
       const saved =
-        window.localStorage.getItem('jans-desk-v1') || window.localStorage.getItem(legacyStorageKey)
-      if (saved) setStore({ ...DEFAULT_STORE, ...JSON.parse(saved) })
+        window.localStorage.getItem(storageKey) ||
+        (currentUser === 'sidd' ? window.localStorage.getItem('jans-desk-v1') : null)
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        setStore({
+          ...DEFAULT_STORE,
+          ...parsed,
+          profiles: normalizeProfiles({
+            ...DEFAULT_STORE.profiles,
+            ...(parsed.profiles || {}),
+          }),
+        })
+      } else {
+        setStore(DEFAULT_STORE)
+      }
     } finally {
       setLoaded(true)
     }
-  }, [])
 
+    // Fetch from SQLite for this user
+    fetch(`/api/sync?user=${currentUser}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.state) {
+          setStore((current) => ({
+            ...current,
+            ...data.state,
+            profiles: normalizeProfiles({
+              ...current.profiles,
+              ...(data.state.profiles || {}),
+            }),
+          }))
+        }
+      })
+      .catch(() => {})
+  }, [currentUser])
+
+  // Cross-device sync: re-fetch from SQLite when switching back to tab/app
   useEffect(() => {
-    if (loaded) window.localStorage.setItem('jans-desk-v1', JSON.stringify(store))
-  }, [loaded, store])
+    function syncLatest() {
+      fetch(`/api/sync?user=${currentUser}`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data?.state) {
+            setStore((current) => ({
+              ...current,
+              ...data.state,
+              profiles: normalizeProfiles({
+                ...current.profiles,
+                ...(data.state.profiles || {}),
+              }),
+            }))
+          }
+        })
+        .catch(() => {})
+    }
 
-  return { store, setStore, loaded }
+    window.addEventListener('focus', syncLatest)
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') syncLatest()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.removeEventListener('focus', syncLatest)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [currentUser])
+
+  // Save changes for this user
+  useEffect(() => {
+    if (!loaded) return
+    const storageKey = `jans-desk-v1-${currentUser}`
+    window.localStorage.setItem(storageKey, JSON.stringify(store))
+    window.localStorage.setItem('jans-active-user', currentUser)
+
+    const timer = setTimeout(() => {
+      fetch(`/api/sync?user=${currentUser}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(store),
+      }).catch(() => {})
+    }, 1200)
+    return () => clearTimeout(timer)
+  }, [loaded, store, currentUser])
+
+  return { store, setStore, loaded, currentUser, setCurrentUser }
 }
 
 export function DaybookApp() {
-  const { store, setStore } = useLocalStore()
+  const { store, setStore, currentUser, setCurrentUser } = useLocalStore()
   const [active, setActive] = useState<Section>('Today')
   const [capture, setCapture] = useState<CaptureType | null>(null)
   const [query, setQuery] = useState('')
@@ -488,9 +531,143 @@ export function DaybookApp() {
   }, [])
 
   const searchResults = useMemo(() => {
-    if (!query.trim()) return []
-    const needle = query.toLowerCase()
-    return [
+    const raw = query.trim()
+    if (!raw) return []
+    const needle = raw.toLowerCase()
+    type SearchResultItem = {
+      id: string
+      title: string
+      meta: string
+      section: Section
+      action?: () => void
+      isAction?: boolean
+    }
+    const actions: SearchResultItem[] = []
+
+    // 1. YouTube Quick Add via URL
+    const ytId = extractYouTubeId(raw)
+    if (ytId) {
+      actions.push({
+        id: 'action-yt-add',
+        title: `+ Save Video to Queue (${ytId})`,
+        meta: 'Quick Action · YouTube Queue',
+        section: 'YouTube',
+        isAction: true,
+        action: () => {
+          const videoUrl = raw.startsWith('http') ? raw : `https://${raw}`
+          setStore((current) => ({
+            ...current,
+            videos: [
+              {
+                id: `video-${Date.now()}`,
+                title: `YouTube Video (${ytId})`,
+                url: videoUrl,
+                videoId: ytId,
+                label: 'Learning',
+                status: 'queue',
+                createdAt: new Date().toISOString(),
+              },
+              ...current.videos,
+            ],
+          }))
+          setActive('YouTube')
+        },
+      })
+    }
+
+    // 2. Task Quick Add (task: or todo:)
+    if (needle.startsWith('task:') || needle.startsWith('todo:')) {
+      const taskTitle = raw.replace(/^(task|todo):\s*/i, '').trim()
+      if (taskTitle) {
+        actions.push({
+          id: 'action-task-add',
+          title: `+ Add Task: "${taskTitle}"`,
+          meta: 'Quick Action · Today Plan',
+          section: 'Today',
+          isAction: true,
+          action: () => {
+            setStore((current) => ({
+              ...current,
+              tasks: [
+                ...current.tasks,
+                {
+                  id: `task-${Date.now()}`,
+                  title: taskTitle,
+                  done: false,
+                  priority: 'Normal',
+                },
+              ],
+            }))
+            setActive('Today')
+          },
+        })
+      }
+    }
+
+    // 3. Note Quick Add (note:)
+    if (needle.startsWith('note:')) {
+      const noteTitle = raw.replace(/^note:\s*/i, '').trim()
+      if (noteTitle) {
+        actions.push({
+          id: 'action-note-add',
+          title: `+ Create Note: "${noteTitle}"`,
+          meta: 'Quick Action · Notes',
+          section: 'Notes',
+          isAction: true,
+          action: () => {
+            setStore((current) => ({
+              ...current,
+              notes: [
+                {
+                  id: `note-${Date.now()}`,
+                  title: noteTitle,
+                  body: '',
+                  label: 'General',
+                  pinned: false,
+                  createdAt: new Date().toISOString(),
+                },
+                ...current.notes,
+              ],
+            }))
+            setActive('Notes')
+          },
+        })
+      }
+    }
+
+    // 4. Command Quick Add (cmd: or command:)
+    if (needle.startsWith('cmd:') || needle.startsWith('command:')) {
+      const cmdStr = raw.replace(/^(cmd|command):\s*/i, '').trim()
+      if (cmdStr) {
+        actions.push({
+          id: 'action-cmd-add',
+          title: `+ Save Command: "${cmdStr}"`,
+          meta: 'Quick Action · Commands Runbook',
+          section: 'Commands',
+          isAction: true,
+          action: () => {
+            setStore((current) => ({
+              ...current,
+              commands: [
+                {
+                  id: `cmd-${Date.now()}`,
+                  name: cmdStr.split(' ')[0] || 'Command',
+                  command: cmdStr,
+                  label: 'CLI',
+                  description: 'Saved via command bar',
+                  favorite: false,
+                },
+                ...current.commands,
+              ],
+            }))
+            setActive('Commands')
+          },
+        })
+      }
+    }
+
+    // Standard content search matches
+    const contentMatches: SearchResultItem[] = [
       ...store.notes
         .filter((item) => `${item.title} ${item.body} ${item.label}`.toLowerCase().includes(needle))
         .map((item) => ({
@@ -535,11 +712,19 @@ export function DaybookApp() {
           meta: `YouTube · ${item.label}`,
           section: 'YouTube' as Section,
         })),
-    ].slice(0, 8)
+    ]
+
+    return [...actions, ...contentMatches].slice(0, 8)
   }, [query, store])
 
-  function chooseSearchResult(section: Section) {
-    setActive(section)
+  function chooseSearchResult(result: Section | { section: Section; action?: () => void }) {
+    if (typeof result === 'string') {
+      setActive(result)
+    } else if (result.action) {
+      result.action()
+    } else {
+      setActive(result.section)
+    }
     setQuery('')
     setMobileNav(false)
   }
@@ -659,13 +844,15 @@ export function DaybookApp() {
                 </kbd>
               </div>
               {query && (
-                <div className="absolute left-0 right-0 top-12 border-2 border-[#20211f] bg-[#f3efe3] p-2 shadow-[5px_5px_0_#20211f]">
+                <div className="absolute left-0 right-0 top-12 z-50 border-2 border-[#20211f] bg-[#f3efe3] p-2 shadow-[5px_5px_0_#20211f]">
                   {searchResults.length ? (
                     searchResults.map((result) => (
                       <button
                         key={result.id}
-                        onClick={() => chooseSearchResult(result.section)}
-                        className="flex w-full items-center justify-between border-b border-[#20211f]/20 px-3 py-3 text-left last:border-0 hover:bg-[#ffca3a]/25"
+                        onClick={() => chooseSearchResult(result)}
+                        className={`flex w-full items-center justify-between border-b border-[#20211f]/20 px-3 py-3 text-left last:border-0 hover:bg-[#ffca3a]/25 ${
+                          result.isAction ? 'bg-[#ffca3a]/25 font-bold' : ''
+                        }`}
                       >
                         <span>
                           <strong className="block text-[11px]">{result.title}</strong>
@@ -673,21 +860,52 @@ export function DaybookApp() {
                             {result.meta}
                           </small>
                         </span>
-                        <Icon name="arrow" size={13} />
+                        <Icon name={result.isAction ? 'plus' : 'arrow'} size={13} />
                       </button>
                     ))
                   ) : (
-                    <p className="px-3 py-5 text-center text-[11px] text-[#737970]">
-                      No matching records.
-                    </p>
+                    <div className="p-3 text-center">
+                      <p className="text-[11px] text-[#737970]">No matching records.</p>
+                      <p className="mt-1 font-mono text-[8px] text-[#8e928a]">
+                        Tip: Type <code className="bg-[#dfe5da] px-1 py-0.5">task:</code>,{' '}
+                        <code className="bg-[#dfe5da] px-1 py-0.5">note:</code>,{' '}
+                        <code className="bg-[#dfe5da] px-1 py-0.5">cmd:</code>, or paste a YouTube URL.
+                      </p>
+                    </div>
                   )}
                 </div>
               )}
             </div>
 
+            {/* Multi-Tenant Profile Switcher */}
+            <div className="ml-auto flex items-center border-2 border-[#20211f] bg-white p-0.5 shadow-[2px_2px_0_#20211f]">
+              <button
+                onClick={() => setCurrentUser('sidd')}
+                className={`flex items-center gap-1.5 px-2.5 py-1 text-[10px] font-black uppercase transition ${
+                  currentUser === 'sidd'
+                    ? 'bg-[#20211f] text-[#ffca3a]'
+                    : 'text-[#596057] hover:bg-[#dfe5da]'
+                }`}
+                title="Switch to Siddhant's Profile"
+              >
+                <span>SIDD</span>
+              </button>
+              <button
+                onClick={() => setCurrentUser('jahnavi')}
+                className={`flex items-center gap-1.5 px-2.5 py-1 text-[10px] font-black uppercase transition ${
+                  currentUser === 'jahnavi'
+                    ? 'bg-[#e66b3c] text-white'
+                    : 'text-[#596057] hover:bg-[#dfe5da]'
+                }`}
+                title="Switch to Jahnavi's Profile"
+              >
+                <span>JAHNAVI</span>
+              </button>
+            </div>
+
             <button
               onClick={() => setCapture('Note')}
-              className="ml-auto flex h-10 items-center gap-2 border-2 border-[#20211f] bg-[#ffca3a] px-3 text-[11px] font-black shadow-[3px_3px_0_#20211f] transition active:translate-x-[2px] active:translate-y-[2px] active:shadow-none md:px-4"
+              className="flex h-10 items-center gap-2 border-2 border-[#20211f] bg-[#ffca3a] px-3 text-[11px] font-black shadow-[3px_3px_0_#20211f] transition active:translate-x-[2px] active:translate-y-[2px] active:shadow-none md:px-4"
             >
               <Icon name="plus" size={16} />
               <span className="hidden sm:inline">QUICK CAPTURE</span>
@@ -750,7 +968,12 @@ export function DaybookApp() {
             {active === 'YouTube' && <YouTubeView store={store} setStore={setStore} />}
             {active === 'Profiles' && <ProfilesView store={store} setStore={setStore} />}
             {active === 'Trackers' && <TrackersView store={store} setStore={setStore} />}
-            {active === 'Jans' && <JansView store={store} jansLevel={jansLevel} />}
+            {active === 'Jans' && (
+              <JansView store={store} jansLevel={jansLevel} currentUser={currentUser} />
+            )}
+            {active === 'Library' && (
+              <LibraryView setStore={setStore} currentUser={currentUser} />
+            )}
           </main>
         </div>
       </div>
@@ -1332,7 +1555,11 @@ function CommandsView({
 
 function extractYouTubeId(url: string) {
   try {
-    const parsed = new URL(url)
+    const raw = url.trim()
+    if (!raw) return ''
+    const normalized =
+      raw.startsWith('http://') || raw.startsWith('https://') ? raw : `https://${raw}`
+    const parsed = new URL(normalized)
     if (parsed.hostname.includes('youtu.be')) return parsed.pathname.slice(1).split('/')[0]
     if (parsed.pathname.startsWith('/shorts/')) return parsed.pathname.split('/')[2]
     return parsed.searchParams.get('v') || ''
@@ -1349,45 +1576,76 @@ function YouTubeView({
   setStore: React.Dispatch<React.SetStateAction<Store>>
 }) {
   const [showForm, setShowForm] = useState(false)
+  const [url, setUrl] = useState('')
+  const [title, setTitle] = useState('')
+  const [label, setLabel] = useState('')
+  const [fetchingMeta, setFetchingMeta] = useState(false)
+
   const queued = store.videos.filter((video) => video.status === 'queue')
   const watched = store.videos.filter((video) => video.status === 'watched')
 
+  async function handleUrlChange(newUrl: string) {
+    setUrl(newUrl)
+    const videoId = extractYouTubeId(newUrl)
+    if (videoId && !title) {
+      setFetchingMeta(true)
+      try {
+        const response = await fetch(
+          `https://www.youtube.com/oembed?url=${encodeURIComponent(newUrl.trim())}&format=json`,
+        )
+        if (response.ok) {
+          const data = await response.json()
+          if (data.title) setTitle(data.title)
+          if (!label && data.author_name) setLabel(data.author_name)
+        }
+      } catch {
+        // Graceful fallback to manual entry
+      } finally {
+        setFetchingMeta(false)
+      }
+    }
+  }
+
   function addVideo(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const form = new FormData(event.currentTarget)
-    const url = String(form.get('url') || '').trim()
     const videoId = extractYouTubeId(url)
     if (!videoId) return
-    const title = String(form.get('title') || '').trim() || 'Untitled YouTube video'
-    const label = String(form.get('label') || '').trim() || 'Learning'
+    const finalTitle = title.trim() || 'Untitled YouTube video'
+    const finalLabel = label.trim() || 'Learning'
     setStore((current) => ({
       ...current,
       videos: [
         {
           id: `video-${Date.now()}`,
-          title,
+          title: finalTitle,
           url,
           videoId,
-          label,
+          label: finalLabel,
           status: 'queue',
           createdAt: new Date().toISOString(),
         },
         ...current.videos,
       ],
     }))
-    event.currentTarget.reset()
+    setUrl('')
+    setTitle('')
+    setLabel('')
     setShowForm(false)
   }
 
   function toggleVideo(id: string) {
-    setStore((current) => ({
-      ...current,
-      videos: current.videos.map((video) =>
-        video.id === id
-          ? { ...video, status: video.status === 'queue' ? 'watched' : 'queue' }
-          : video,
-      ),
-    }))
+    setStore((current) => {
+      const target = current.videos.find((video) => video.id === id)
+      const nextStatus = target?.status === 'queue' ? 'watched' : 'queue'
+      const xpBonus = nextStatus === 'watched' ? 35 : 0
+      return {
+        ...current,
+        knowledgeXp: (current.knowledgeXp || 0) + xpBonus,
+        videos: current.videos.map((video) =>
+          video.id === id ? { ...video, status: nextStatus } : video,
+        ),
+      }
+    })
   }
 
   return (
@@ -1407,17 +1665,23 @@ function YouTubeView({
           <input
             name="url"
             required
-            placeholder="Paste YouTube URL"
+            value={url}
+            onChange={(event) => handleUrlChange(event.target.value)}
+            placeholder={fetchingMeta ? 'Fetching video info...' : 'Paste YouTube URL'}
             className="h-11 border-2 border-[#20211f] bg-white px-3 text-[11px] outline-none"
           />
           <input
             name="title"
-            placeholder="Video title"
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            placeholder={fetchingMeta ? 'Auto-fetching title...' : 'Video title'}
             className="h-11 border-2 border-[#20211f] bg-white px-3 text-[11px] outline-none"
           />
           <input
             name="label"
-            placeholder="Label"
+            value={label}
+            onChange={(event) => setLabel(event.target.value)}
+            placeholder="Label / Channel"
             className="h-11 border-2 border-[#20211f] bg-white px-3 text-[11px] outline-none"
           />
           <button className="h-11 border-2 border-[#20211f] bg-[#20211f] px-5 font-mono text-[8px] font-black uppercase text-white">
@@ -1545,8 +1809,9 @@ function ProfilesView({
   const [errors, setErrors] = useState<Record<string, string>>({})
 
   async function loadProfile(platform: keyof CompetitiveProfiles, username?: string) {
-    const handle = (username ?? store.profiles[platform]).trim()
-    if (!handle || platform === 'codechef') return
+    const raw = username ?? store.profiles?.[platform]
+    const handle = (typeof raw === 'string' ? raw : '').trim()
+    if (!handle) return
     setLoading(platform)
     setErrors((current) => ({ ...current, [platform]: '' }))
     try {
@@ -1567,17 +1832,21 @@ function ProfilesView({
   }
 
   useEffect(() => {
-    if (store.profiles.github) loadProfile('github')
-    // The saved handle is intentionally the only trigger for initial sync.
+    if (typeof store.profiles?.github === 'string' && store.profiles.github) loadProfile('github')
+    if (typeof store.profiles?.leetcode === 'string' && store.profiles.leetcode) loadProfile('leetcode')
+    if (typeof store.profiles?.codeforces === 'string' && store.profiles.codeforces) loadProfile('codeforces')
+    if (typeof store.profiles?.codechef === 'string' && store.profiles.codechef) loadProfile('codechef')
+    // The saved handles are the trigger for initial sync.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   function saveHandle(platform: keyof CompetitiveProfiles, username: string) {
+    const cleanUsername = typeof username === 'string' ? username.trim() : ''
     setStore((current) => ({
       ...current,
-      profiles: { ...current.profiles, [platform]: username.trim() },
+      profiles: { ...current.profiles, [platform]: cleanUsername },
     }))
-    if (platform !== 'codechef') loadProfile(platform, username)
+    loadProfile(platform, cleanUsername)
   }
 
   const github = data.github
@@ -1699,8 +1968,9 @@ function ProfilesView({
           accent="#9b806d"
           platform="codechef"
           value={store.profiles.codechef}
-          loading={false}
-          error=""
+          data={data.codechef}
+          loading={loading === 'codechef'}
+          error={errors.codechef || ''}
           onSave={(value) => saveHandle('codechef', value)}
         />
       </div>
@@ -1764,28 +2034,39 @@ function ProfileInput({
   onSave,
 }: {
   platform: string
-  value: string
+  value?: any
   loading: boolean
   onSave: (value: string) => void
 }) {
-  const [draft, setDraft] = useState(value)
+  const safeInitial = typeof value === 'string' ? value : ''
+  const [draft, setDraft] = useState(safeInitial)
+
+  useEffect(() => {
+    setDraft(typeof value === 'string' ? value : '')
+  }, [value])
+
+  const safeDraft = typeof draft === 'string' ? draft : ''
+  const hasValidDraft = safeDraft.trim().length > 0
+
   return (
     <form
       onSubmit={(event) => {
         event.preventDefault()
-        onSave(draft)
+        if (hasValidDraft) {
+          onSave(safeDraft.trim())
+        }
       }}
       className="flex"
     >
       <input
-        value={draft}
+        value={safeDraft}
         onChange={(event) => setDraft(event.target.value)}
         aria-label={`${platform} username`}
         placeholder={`${platform} username`}
         className="h-11 min-w-0 border-2 border-r-0 border-[#20211f] bg-white px-3 text-[11px] outline-none"
       />
       <button
-        disabled={loading || !draft.trim()}
+        disabled={loading || !hasValidDraft}
         className="h-11 border-2 border-[#20211f] bg-[#20211f] px-4 font-mono text-[8px] font-black uppercase text-white disabled:opacity-50"
       >
         {loading ? 'Syncing' : 'Connect'}
@@ -1807,12 +2088,13 @@ function PlatformCard({
   name: string
   accent: string
   platform: keyof CompetitiveProfiles
-  value: string
+  value?: any
   data?: ProfileData | null
   loading: boolean
   error: string
   onSave: (value: string) => void
 }) {
+  const safeVal = typeof value === 'string' ? value : ''
   return (
     <article className="border-2 border-[#20211f] bg-white shadow-[3px_3px_0_#20211f]">
       <div
@@ -1821,11 +2103,11 @@ function PlatformCard({
       >
         <strong className="text-[13px]">{name}</strong>
         <span className="font-mono text-[8px] font-black uppercase">
-          {data ? 'Verified' : value ? 'Saved' : 'Not linked'}
+          {data ? 'Verified' : safeVal ? 'Saved' : 'Not linked'}
         </span>
       </div>
       <div className="p-4">
-        <ProfileInput platform={platform} value={value} loading={loading} onSave={onSave} />
+        <ProfileInput platform={platform} value={safeVal} loading={loading} onSave={onSave} />
         {error && <p className="mt-2 text-[9px] font-bold text-[#b34e2d]">{error}</p>}
         {data ? (
           <div className="mt-5 grid grid-cols-2 gap-2 border-t border-[#20211f] pt-4">
@@ -1835,6 +2117,28 @@ function PlatformCard({
                 <ProfileMiniStat label="Ranking" value={data.ranking || 0} />
                 <ProfileMiniStat label="Medium" value={data.medium || 0} />
                 <ProfileMiniStat label="Hard" value={data.hard || 0} />
+              </>
+            ) : platform === 'codechef' ? (
+              <>
+                <ProfileMiniStat label="Rating" value={data.rating || 0} />
+                <ProfileMiniStat label="Stars" value={data.rank || '1★'} />
+                <ProfileMiniStat
+                  label="Global Rank"
+                  value={data.ranking ? `#${data.ranking}` : '—'}
+                />
+                <div className="flex items-center justify-center p-2">
+                  <a
+                    href={
+                      data.profileUrl ||
+                      `https://www.codechef.com/users/${encodeURIComponent(value)}`
+                    }
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-mono text-[8px] font-bold uppercase underline hover:text-[#e66b3c]"
+                  >
+                    View CodeChef ↗
+                  </a>
+                </div>
               </>
             ) : (
               <>
@@ -1865,10 +2169,11 @@ function PlatformCard({
   )
 }
 
-function ProfileMiniStat({ label, value }: { label: string; value: number }) {
+function ProfileMiniStat({ label, value }: { label: string; value: number | string }) {
+  const displayValue = typeof value === 'number' ? value.toLocaleString() : value
   return (
     <div>
-      <strong className="block font-mono text-lg">{value.toLocaleString()}</strong>
+      <strong className="block font-mono text-lg">{displayValue}</strong>
       <small className="font-mono text-[7px] font-bold uppercase text-[#777d74]">{label}</small>
     </div>
   )
@@ -1882,6 +2187,26 @@ function TrackersView({
   setStore: React.Dispatch<React.SetStateAction<Store>>
 }) {
   const days = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
+  const craftsmanXp = store.craftsmanXp ?? 180
+  const velocityXp = store.velocityXp ?? 120
+  const knowledgeXp = store.knowledgeXp ?? 70
+
+  function getTier(xp: number) {
+    if (xp >= 1500) return 'Grandmaster'
+    if (xp >= 800) return 'Specialist'
+    if (xp >= 400) return 'Practitioner'
+    if (xp >= 150) return 'Apprentice'
+    return 'Novice'
+  }
+
+  function addXp(track: 'craftsman' | 'velocity', amount: number) {
+    setStore((current) => ({
+      ...current,
+      craftsmanXp: (current.craftsmanXp ?? 180) + (track === 'craftsman' ? amount : 0),
+      velocityXp: (current.velocityXp ?? 120) + (track === 'velocity' ? amount : 0),
+    }))
+  }
+
   return (
     <>
       <PageHeading
@@ -1960,38 +2285,547 @@ function TrackersView({
           </div>
         </section>
       </div>
+
+      {/* Authorship Spectrum Card */}
+      <div className="mt-8 border-2 border-[#20211f] bg-white shadow-[4px_4px_0_#20211f]">
+        <div className="border-b-2 border-[#20211f] bg-[#dfe5da] p-4 flex items-center justify-between">
+          <div>
+            <h2 className="text-[15px] font-black">Authorship spectrum</h2>
+            <p className="mt-1 text-[9px] text-[#6d746c]">
+              Separating genuine handcrafted engineering from AI-assisted shipping.
+            </p>
+          </div>
+          <span className="font-mono text-[8px] font-black uppercase border border-[#20211f] bg-white px-2 py-0.5">
+            Skill Radar
+          </span>
+        </div>
+
+        <div className="p-4 md:p-6 grid gap-5 md:grid-cols-3">
+          {/* Craftsman Track */}
+          <div className="border-2 border-[#20211f] bg-[#f3efe3] p-4 shadow-[2px_2px_0_#20211f] flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="font-mono text-[8px] font-black uppercase tracking-[0.12em] text-[#20211f]">
+                  01 · Craftsman XP
+                </span>
+                <span className="font-mono text-[7px] font-bold bg-[#75a38a] text-white px-1.5 py-0.5 border border-[#20211f]">
+                  Handcrafted
+                </span>
+              </div>
+              <strong className="block text-2xl font-black text-[#20211f]">
+                {craftsmanXp} <span className="text-xs font-normal font-mono text-[#6d746c]">XP</span>
+              </strong>
+              <p className="mt-1 text-[9px] text-[#6d746c] leading-4">
+                College OS labs, algorithms, manual C/C++ memory, pointer logic, and scratch code.
+              </p>
+            </div>
+            <div className="mt-4 pt-3 border-t border-[#20211f]/20">
+              <div className="h-2 border border-[#20211f] bg-white mb-2">
+                <div
+                  className="h-full bg-[#75a38a]"
+                  style={{ width: `${Math.min(100, (craftsmanXp % 300) / 3)}%` }}
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-[8px] text-[#6d746c]">
+                  Tier: <strong className="text-[#20211f]">{getTier(craftsmanXp)}</strong>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => addXp('craftsman', 30)}
+                  className="border border-[#20211f] bg-white px-2 py-1 font-mono text-[8px] font-bold hover:bg-[#dfe5da]"
+                >
+                  +30 XP Log Lab
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Velocity Track */}
+          <div className="border-2 border-[#20211f] bg-[#f3efe3] p-4 shadow-[2px_2px_0_#20211f] flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="font-mono text-[8px] font-black uppercase tracking-[0.12em] text-[#20211f]">
+                  02 · Velocity XP
+                </span>
+                <span className="font-mono text-[7px] font-bold bg-[#7f8fbd] text-white px-1.5 py-0.5 border border-[#20211f]">
+                  AI-Assisted
+                </span>
+              </div>
+              <strong className="block text-2xl font-black text-[#20211f]">
+                {velocityXp} <span className="text-xs font-normal font-mono text-[#6d746c]">XP</span>
+              </strong>
+              <p className="mt-1 text-[9px] text-[#6d746c] leading-4">
+                Rapid hackathon MVPs, prompt-orchestrated pipelines, and high-velocity shipping.
+              </p>
+            </div>
+            <div className="mt-4 pt-3 border-t border-[#20211f]/20">
+              <div className="h-2 border border-[#20211f] bg-white mb-2">
+                <div
+                  className="h-full bg-[#7f8fbd]"
+                  style={{ width: `${Math.min(100, (velocityXp % 300) / 3)}%` }}
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-[8px] text-[#6d746c]">
+                  Tier: <strong className="text-[#20211f]">{getTier(velocityXp)}</strong>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => addXp('velocity', 30)}
+                  className="border border-[#20211f] bg-white px-2 py-1 font-mono text-[8px] font-bold hover:bg-[#dfe5da]"
+                >
+                  +30 XP Ship
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Knowledge Track */}
+          <div className="border-2 border-[#20211f] bg-[#f3efe3] p-4 shadow-[2px_2px_0_#20211f] flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="font-mono text-[8px] font-black uppercase tracking-[0.12em] text-[#20211f]">
+                  03 · Knowledge XP
+                </span>
+                <span className="font-mono text-[7px] font-bold bg-[#ffca3a] text-[#20211f] px-1.5 py-0.5 border border-[#20211f]">
+                  Lectures & Docs
+                </span>
+              </div>
+              <strong className="block text-2xl font-black text-[#20211f]">
+                {knowledgeXp} <span className="text-xs font-normal font-mono text-[#6d746c]">XP</span>
+              </strong>
+              <p className="mt-1 text-[9px] text-[#6d746c] leading-4">
+                Research papers, architecture deep-dives, and technical YouTube lectures watched.
+              </p>
+            </div>
+            <div className="mt-4 pt-3 border-t border-[#20211f]/20">
+              <div className="h-2 border border-[#20211f] bg-white mb-2">
+                <div
+                  className="h-full bg-[#e66b3c]"
+                  style={{ width: `${Math.min(100, (knowledgeXp % 300) / 3)}%` }}
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-[8px] text-[#6d746c]">
+                  Tier: <strong className="text-[#20211f]">{getTier(knowledgeXp)}</strong>
+                </span>
+                <span className="font-mono text-[8px] text-[#6d746c]">
+                  Auto: +35/video
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </>
   )
 }
 
-function JansView({ store, jansLevel }: { store: Store; jansLevel: number }) {
+function cleanForSpeech(text: string): string {
+  return text
+    .replace(/[*_#`~>]/g, '')
+    .replace(/\[(.*?)\]\(.*?\)/g, '$1')
+    .replace(/```[\s\S]*?```/g, 'Code block omitted.')
+    .trim()
+}
+
+function JansView({
+  store,
+  jansLevel,
+  currentUser = 'sidd',
+}: {
+  store: Store
+  jansLevel: number
+  currentUser?: 'sidd' | 'jahnavi'
+}) {
+  const isJahnavi = currentUser === 'jahnavi'
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'assistant',
-      content:
-        'I’m here. Give me the messy version of your day and I’ll help turn it into a realistic plan.',
+      content: isJahnavi
+        ? 'Hey Jahnavi! Siddhant built me to be your study partner, organizer, and wingman. How can I help you today?'
+        : 'I’m here. Give me the messy version of your day and I’ll help turn it into a realistic plan.',
     },
   ])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [online, setOnline] = useState<boolean | null>(null)
+  const [voiceEnabled, setVoiceEnabled] = useState(true)
+  const [selectedVoice, setSelectedVoice] = useState('en-GB-RyanNeural')
+  const [jarvisLive, setJarvisLive] = useState(false)
+  const [engineState, setEngineState] = useState<'idle' | 'listening' | 'thinking' | 'speaking' | 'cooldown'>('idle')
+  const [micError, setMicError] = useState<string | null>(null)
+
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const recognitionRef = useRef<any>(null)
+  const silenceTimerRef = useRef<any>(null)
+  const accumulatedSpeechRef = useRef<string>('')
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null)
+  const activeUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null)
+  const jarvisLiveRef = useRef(false)
+  const engineStateRef = useRef<'idle' | 'listening' | 'thinking' | 'speaking' | 'cooldown'>('idle')
+
+  const isSpeaking = engineState === 'speaking'
+  const isListening = engineState === 'listening'
+  const isThinking = engineState === 'thinking' || sending
+
+  function setEngine(nextState: 'idle' | 'listening' | 'thinking' | 'speaking' | 'cooldown') {
+    engineStateRef.current = nextState
+    setEngineState(nextState)
+  }
 
   useEffect(() => {
-    fetch('/api/jans')
-      .then((response) => response.json())
-      .then((data) => setOnline(Boolean(data.online)))
-      .catch(() => setOnline(false))
+    jarvisLiveRef.current = jarvisLive
+  }, [jarvisLive])
+
+  // Load voice preference on mount
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem('jans-voice-enabled')
+      if (saved !== null) {
+        setVoiceEnabled(saved === 'true')
+      }
+      const savedVoice = window.localStorage.getItem('jans-neural-voice')
+      if (savedVoice) {
+        setSelectedVoice(savedVoice)
+      } else if (currentUser === 'jahnavi') {
+        setSelectedVoice('en-GB-SoniaNeural')
+      }
+    } catch {}
+    return () => {
+      stopSpeakingInternal()
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort()
+        } catch {}
+      }
+      if (silenceTimerRef.current) {
+        clearTimeout(silenceTimerRef.current)
+      }
+    }
+  }, [currentUser])
+
+  function stopSpeakingInternal() {
+    if (currentAudioRef.current) {
+      try {
+        currentAudioRef.current.pause()
+        currentAudioRef.current.currentTime = 0
+        currentAudioRef.current.src = ''
+      } catch {}
+      currentAudioRef.current = null
+    }
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      try {
+        window.speechSynthesis.cancel()
+      } catch {}
+    }
+    activeUtteranceRef.current = null
+  }
+
+  function stopSpeaking() {
+    stopSpeakingInternal()
+    if (engineStateRef.current === 'speaking') {
+      setEngine('idle')
+    }
+  }
+
+  function stopListening() {
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current)
+      silenceTimerRef.current = null
+    }
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.abort()
+      } catch {}
+      recognitionRef.current = null
+    }
+    if (engineStateRef.current === 'listening') {
+      setEngine('idle')
+    }
+  }
+
+  async function speakText(text: string, onComplete?: () => void) {
+    // 1. HARD LOCK: Always terminate listening before playing audio
+    stopListening()
+    stopSpeakingInternal()
+
+    const clean = cleanForSpeech(text)
+    if (!clean) {
+      setEngine('idle')
+      if (onComplete) onComplete()
+      return
+    }
+
+    setEngine('speaking')
+
+    try {
+      // 1. Primary: Studio-Quality 24kHz Neural Audio via /api/tts
+      const response = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: clean, voice: selectedVoice }),
+      })
+
+      if (!response.ok) throw new Error('Neural TTS API failed')
+
+      const blob = await response.blob()
+      const audioUrl = URL.createObjectURL(blob)
+      const audio = new Audio(audioUrl)
+      currentAudioRef.current = audio
+
+      const cleanup = () => {
+        URL.revokeObjectURL(audioUrl)
+        if (currentAudioRef.current === audio) {
+          currentAudioRef.current = null
+        }
+      }
+
+      audio.onended = () => {
+        cleanup()
+        setEngine('cooldown')
+        if (onComplete) onComplete()
+      }
+
+      audio.onerror = () => {
+        cleanup()
+        setEngine('idle')
+        if (onComplete) onComplete()
+      }
+
+      await audio.play()
+    } catch (err) {
+      console.warn('Neural audio fallback to browser synthesis:', err)
+      // 2. Resilient Fallback to browser SpeechSynthesis
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        const utterance = new SpeechSynthesisUtterance(clean)
+        activeUtteranceRef.current = utterance
+        const voices = window.speechSynthesis.getVoices()
+        const jarvisVoice =
+          voices.find(
+            (v) =>
+              v.lang.startsWith('en-GB') ||
+              v.name.toLowerCase().includes('daniel') ||
+              v.name.toLowerCase().includes('british') ||
+              v.name.toLowerCase().includes('oliver') ||
+              v.name.toLowerCase().includes('arthur'),
+          ) || voices.find((v) => v.lang.startsWith('en'))
+        if (jarvisVoice) utterance.voice = jarvisVoice
+        utterance.rate = 1.0
+        utterance.pitch = 1.0
+
+        utterance.onend = () => {
+          activeUtteranceRef.current = null
+          setEngine('cooldown')
+          if (onComplete) onComplete()
+        }
+        utterance.onerror = () => {
+          activeUtteranceRef.current = null
+          setEngine('idle')
+          if (onComplete) onComplete()
+        }
+        window.speechSynthesis.speak(utterance)
+      } else {
+        setEngine('idle')
+        if (onComplete) onComplete()
+      }
+    }
+  }
+
+  async function startListening() {
+    if (typeof window === 'undefined') return
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      setMicError(
+        'Voice input is not supported in this browser. Please use Chrome, Safari, or Edge.',
+      )
+      return
+    }
+
+    // Guard: Never start microphone while speaking or computing
+    if (engineStateRef.current === 'speaking' || engineStateRef.current === 'thinking') {
+      return
+    }
+
+    stopSpeakingInternal()
+    setMicError(null)
+
+    // Immediate 0ms UI feedback
+    setEngine('listening')
+
+    // Clean up any lingering recognition session
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.abort()
+      } catch {}
+      recognitionRef.current = null
+    }
+
+    try {
+      const recognition = new SpeechRecognition()
+      recognitionRef.current = recognition
+      recognition.continuous = true
+      recognition.interimResults = true
+      recognition.lang = 'en-US'
+
+      recognition.onstart = () => {
+        setEngine('listening')
+      }
+
+      recognition.onresult = (event: any) => {
+        if (engineStateRef.current !== 'listening') return
+
+        let interim = ''
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          interim += event.results[i][0].transcript
+        }
+
+        if (interim) {
+          accumulatedSpeechRef.current = interim
+          setInput(interim)
+
+          // Auto-submit after natural pause in live duplex mode
+          if (silenceTimerRef.current) {
+            clearTimeout(silenceTimerRef.current)
+            silenceTimerRef.current = null
+          }
+
+          if (jarvisLiveRef.current) {
+            silenceTimerRef.current = setTimeout(() => {
+              const spoken = accumulatedSpeechRef.current.trim()
+              if (spoken.length > 0 && engineStateRef.current === 'listening') {
+                accumulatedSpeechRef.current = ''
+                submitQuery(spoken)
+              }
+            }, 1300)
+          }
+        }
+      }
+
+      recognition.onerror = (event: any) => {
+        console.warn('SpeechRecognition error:', event?.error)
+        if (event?.error === 'not-allowed' || event?.error === 'service-not-allowed') {
+          setMicError(
+            'Microphone access blocked. Please tap the lock icon in your browser address bar to allow mic access.',
+          )
+          setJarvisLive(false)
+          jarvisLiveRef.current = false
+          stopListening()
+        } else if (event?.error === 'audio-capture') {
+          setMicError('Microphone in use by another application or disconnected.')
+          stopListening()
+        }
+      }
+
+      recognition.onend = () => {
+        // In continuous Jarvis Live mode, auto-resume listening if still in listening state
+        if (jarvisLiveRef.current && engineStateRef.current === 'listening') {
+          setTimeout(() => {
+            if (jarvisLiveRef.current && engineStateRef.current === 'listening') {
+              try {
+                recognition.start()
+              } catch {}
+            }
+          }, 200)
+        } else if (engineStateRef.current === 'listening' && !jarvisLiveRef.current) {
+          setEngine('idle')
+        }
+      }
+
+      recognition.start()
+    } catch (err: any) {
+      console.warn('Speech recognition init error:', err)
+      setEngine('idle')
+    }
+  }
+
+  function interruptAndListen() {
+    stopSpeakingInternal()
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current)
+      silenceTimerRef.current = null
+    }
+    accumulatedSpeechRef.current = ''
+    setInput('')
+    startListening()
+  }
+
+  async function toggleJarvisLive() {
+    if (jarvisLive) {
+      setJarvisLive(false)
+      jarvisLiveRef.current = false
+      stopListening()
+      stopSpeakingInternal()
+      setEngine('idle')
+    } else {
+      setJarvisLive(true)
+      jarvisLiveRef.current = true
+      setVoiceEnabled(true)
+      startListening()
+    }
+  }
+
+  function toggleManualMic() {
+    if (engineStateRef.current === 'speaking') {
+      interruptAndListen()
+    } else if (engineStateRef.current === 'listening') {
+      stopListening()
+    } else if (engineStateRef.current === 'thinking') {
+      // Backend is computing, wait
+    } else {
+      // Instant 1-click activation
+      startListening()
+    }
+  }
+
+  function testVoicePlayback() {
+    const sample = isJahnavi
+      ? 'Hey Jahnavi! All systems nominal. How can I help you today?'
+      : 'Jarvis online, Siddhant. Engineering and study telemetry active.'
+    speakText(sample)
+  }
+
+  useEffect(() => {
+    setMessages([
+      {
+        role: 'assistant',
+        content: isJahnavi
+          ? 'Hey Jahnavi! Siddhant built me to be your study partner, organizer, and wingman. How can I help you today?'
+          : 'I’m here. Give me the messy version of your day and I’ll help turn it into a realistic plan.',
+      },
+    ])
+  }, [currentUser, isJahnavi])
+
+  useEffect(() => {
+    function check() {
+      fetch('/api/jans')
+        .then((response) => response.json())
+        .then((data) => setOnline(Boolean(data.online)))
+        .catch(() => setOnline(false))
+    }
+    check()
+    const timer = setInterval(check, 15000)
+    return () => clearInterval(timer)
   }, [])
 
-  async function sendMessage(event: FormEvent) {
-    event.preventDefault()
-    const content = input.trim()
-    if (!content || sending) return
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, sending])
 
-    const nextMessages: Message[] = [...messages, { role: 'user', content }]
+  async function submitQuery(contentToSend: string) {
+    if (!contentToSend || engineStateRef.current === 'thinking') return
+
+    // 1. HARD STOP audio input immediately
+    stopListening()
+    stopSpeakingInternal()
+    setEngine('thinking')
+    setSending(true)
+
+    const nextMessages: Message[] = [...messages, { role: 'user', content: contentToSend }]
     setMessages(nextMessages)
     setInput('')
-    setSending(true)
 
     const context = [
       `Mood: ${store.mood}`,
@@ -2009,27 +2843,69 @@ function JansView({ store, jansLevel }: { store: Store; jansLevel: number }) {
       const response = await fetch('/api/jans', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: nextMessages, context }),
+        body: JSON.stringify({ messages: nextMessages, context, user: currentUser }),
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error)
-      setMessages((current) => [...current, { role: 'assistant', content: data.reply }])
+      const reply = data.reply
+      setMessages((current) => [...current, { role: 'assistant', content: reply }])
       setOnline(true)
+
+      // Spoken voice reply
+      if (voiceEnabled && reply) {
+        speakText(reply, () => {
+          // Acoustic decay buffer: wait 350ms so speaker reverb doesn't self-trigger the mic
+          if (jarvisLiveRef.current) {
+            setTimeout(() => {
+              if (jarvisLiveRef.current && engineStateRef.current !== 'thinking') {
+                startListening()
+              }
+            }, 350)
+          } else {
+            setEngine('idle')
+          }
+        })
+      } else {
+        if (jarvisLiveRef.current) {
+          setTimeout(() => startListening(), 250)
+        } else {
+          setEngine('idle')
+        }
+      }
     } catch {
       setOnline(false)
       const openTasks = store.tasks.filter((task) => !task.done)
+      const fallbackReply = openTasks.length
+        ? `Jans is offline, so I’m using your local plan. Start with “${openTasks[0].title}”. Give it 25 focused minutes, then decide whether it needs another block.`
+        : 'Jans is offline, but your local workspace is available. Your queue is clear—capture one intention for tomorrow and close the day.'
       setMessages((current) => [
         ...current,
         {
           role: 'assistant',
-          content: openTasks.length
-            ? `Jans is offline, so I’m using your local plan. Start with “${openTasks[0].title}”. Give it 25 focused minutes, then decide whether it needs another block.`
-            : 'Jans is offline, but your local workspace is available. Your queue is clear—capture one intention for tomorrow and close the day.',
+          content: fallbackReply,
         },
       ])
+      if (voiceEnabled) {
+        speakText(fallbackReply, () => {
+          if (jarvisLiveRef.current) {
+            setTimeout(() => startListening(), 350)
+          } else {
+            setEngine('idle')
+          }
+        })
+      } else {
+        setEngine('idle')
+      }
     } finally {
       setSending(false)
     }
+  }
+
+  async function sendMessage(event: FormEvent) {
+    event.preventDefault()
+    const content = input.trim()
+    if (!content) return
+    await submitQuery(content)
   }
 
   return (
@@ -2037,8 +2913,9 @@ function JansView({ store, jansLevel }: { store: Store; jansLevel: number }) {
       <PageHeading
         index="08"
         title="Jans intelligence"
-        description="Your Jarvis-style intelligence console: planning, research, prioritization, and practical support in one private room."
+        description="Your Jarvis-style intelligence console: continuous hands-free voice, research, prioritization, and practical support."
       />
+
       <div className="grid min-h-[620px] border-2 border-[#20211f] bg-white shadow-[5px_5px_0_#20211f] lg:grid-cols-[290px_1fr]">
         <aside className="border-b-2 border-[#20211f] bg-[#ffca3a] p-5 lg:border-b-0 lg:border-r-2">
           <div className="flex items-center justify-between">
@@ -2046,28 +2923,196 @@ function JansView({ store, jansLevel }: { store: Store; jansLevel: number }) {
               Jans / Intelligence
             </span>
             <span
-              className={`flex items-center gap-1 font-mono text-[8px] font-bold uppercase ${online ? 'text-[#416450]' : 'text-[#8b4c36]'}`}
+              className={`flex items-center gap-1.5 font-mono text-[8px] font-bold uppercase ${
+                online ? 'text-[#20211f]' : 'text-[#8b4c36]'
+              }`}
             >
-              <i className={`h-2 w-2 ${online ? 'bg-[#75a38a]' : 'bg-[#e66b3c]'}`} />{' '}
-              {online === null ? 'Checking' : online ? 'Online' : 'Local mode'}
+              <i className={`h-2.5 w-2.5 border border-[#20211f] ${online ? 'bg-[#75a38a]' : 'bg-[#e66b3c]'}`} />{' '}
+              {online === null ? 'Checking' : online ? 'Host Online' : 'Local mode'}
             </span>
           </div>
+
           <div className="mt-5 flex justify-center">
             <JansCharacter level={jansLevel} />
           </div>
-          <div className="border-t-2 border-[#20211f] pt-4">
-            <p className="font-mono text-[8px] font-black uppercase tracking-[0.14em]">
-              Jans protocol
+
+          {/* Dynamic Audio Radar & Equalizer */}
+          {isSpeaking ? (
+            <div className="mt-3 flex items-center justify-center gap-1.5 border-2 border-[#20211f] bg-[#20211f] px-3 py-2 shadow-[2px_2px_0_#20211f]">
+              <span className="mr-1 font-mono text-[8px] font-black uppercase tracking-wider text-[#ffca3a]">
+                SPEAKING
+              </span>
+              <span className="h-3 w-1 animate-pulse bg-[#ffca3a]" />
+              <span className="h-5 w-1 animate-pulse bg-[#ffca3a] delay-75" />
+              <span className="h-2 w-1 animate-pulse bg-[#ffca3a] delay-150" />
+              <span className="h-6 w-1 animate-pulse bg-[#ffca3a] delay-100" />
+              <span className="h-4 w-1 animate-pulse bg-[#ffca3a] delay-200" />
+            </div>
+          ) : isListening ? (
+            <div className="mt-3 flex items-center justify-center gap-1.5 border-2 border-[#20211f] bg-[#e66b3c] px-3 py-2 text-white shadow-[2px_2px_0_#20211f]">
+              <span className="mr-1 font-mono text-[8px] font-black uppercase tracking-wider">
+                LISTENING TO YOU...
+              </span>
+              <span className="h-2 w-1 animate-pulse bg-white" />
+              <span className="h-4 w-1 animate-pulse bg-white delay-100" />
+              <span className="h-5 w-1 animate-pulse bg-white delay-150" />
+              <span className="h-3 w-1 animate-pulse bg-white delay-75" />
+            </div>
+          ) : isThinking ? (
+            <div className="mt-3 flex items-center justify-center gap-2 border-2 border-[#20211f] bg-[#dfe5da] px-3 py-2 text-[#20211f] shadow-[2px_2px_0_#20211f]">
+              <span className="h-2 w-2 animate-ping bg-[#20211f]" />
+              <span className="font-mono text-[8px] font-black uppercase tracking-wider">
+                REASONING ON CPU...
+              </span>
+            </div>
+          ) : (
+            <div className="mt-3 flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !voiceEnabled
+                  setVoiceEnabled(next)
+                  if (!next) stopSpeaking()
+                  try {
+                    window.localStorage.setItem('jans-voice-enabled', String(next))
+                  } catch {}
+                }}
+                className={`flex items-center justify-center gap-1.5 border-2 border-[#20211f] px-3 py-1 font-mono text-[8px] font-black uppercase shadow-[2px_2px_0_#20211f] transition ${
+                  voiceEnabled ? 'bg-[#20211f] text-[#ffca3a]' : 'bg-white text-[#737970]'
+                }`}
+                title="Toggle Voice Output"
+              >
+                <Icon name={voiceEnabled ? 'speaker' : 'speakerOff'} size={12} />
+                <span>{voiceEnabled ? 'VOICE ON' : 'VOICE MUTED'}</span>
+              </button>
+
+              <div className="border-2 border-[#20211f] bg-[#f3efe3] p-2 shadow-[2px_2px_0_#20211f]">
+                <div className="mb-1.5 flex items-center justify-between">
+                  <label className="font-mono text-[7px] font-black uppercase tracking-wider text-[#20211f]">
+                    Neural Voice:
+                  </label>
+                  <button
+                    type="button"
+                    onClick={testVoicePlayback}
+                    className="flex items-center gap-1 border border-[#20211f] bg-[#ffca3a] px-1.5 py-0.5 font-mono text-[7px] font-black uppercase text-[#20211f] transition hover:bg-[#ffe380] active:translate-x-[1px] active:translate-y-[1px]"
+                    title="Audition selected neural voice"
+                  >
+                    <Icon name="speaker" size={9} />
+                    <span>AUDITION</span>
+                  </button>
+                </div>
+                <select
+                  value={selectedVoice}
+                  onChange={(e) => {
+                    setSelectedVoice(e.target.value)
+                    try {
+                      window.localStorage.setItem('jans-neural-voice', e.target.value)
+                    } catch {}
+                  }}
+                  className="w-full border-2 border-[#20211f] bg-white px-1.5 py-1 font-mono text-[8px] font-bold text-[#20211f] outline-none"
+                >
+                  <option value="en-GB-RyanNeural">🇬🇧 Ryan (Jarvis British)</option>
+                  <option value="en-GB-SoniaNeural">🇬🇧 Sonia (British Elegant)</option>
+                  <option value="en-US-ChristopherNeural">🇺🇸 Christopher (US Deep)</option>
+                  <option value="en-US-JennyNeural">🇺🇸 Jenny (US Natural)</option>
+                </select>
+              </div>
+            </div>
+          )}
+
+          <div className="mt-4 border-t-2 border-[#20211f] pt-4">
+            <p className="font-mono text-[8px] font-black uppercase tracking-[0.14em] text-[#20211f]">
+              Conversational Engine
             </p>
-            <ul className="mt-3 grid gap-2 text-[10px] leading-4">
-              <li>01 / Reduce before adding</li>
-              <li>02 / Protect the important hour</li>
-              <li>03 / End with a clear next step</li>
-            </ul>
+            <div className="mt-2.5 space-y-2 text-[10px] leading-4 text-[#20211f]">
+              <div className="border-l-2 border-[#20211f] pl-2">
+                <span className="font-mono text-[8px] font-black uppercase block">Hands-Free Duplex</span>
+                Fluid spoken turns without tapping buttons
+              </div>
+              <div className="border-l-2 border-[#20211f] pl-2">
+                <span className="font-mono text-[8px] font-black uppercase block">Silence Detection</span>
+                1.3s pause commits your thought automatically
+              </div>
+              <div className="border-l-2 border-[#20211f] pl-2">
+                <span className="font-mono text-[8px] font-black uppercase block">Instant Barge-In</span>
+                Interrupt speech anytime to redirect
+              </div>
+            </div>
           </div>
         </aside>
 
         <div className="flex min-h-[560px] flex-col">
+          {/* Continuous Ambient Jarvis Live Mode Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b-2 border-[#20211f] bg-[#ffca3a] px-4 py-2.5">
+            <div className="flex items-center gap-2">
+              <span
+                className={`h-2.5 w-2.5 border-2 border-[#20211f] ${
+                  jarvisLive
+                    ? isListening
+                      ? 'animate-ping bg-[#e66b3c]'
+                      : isSpeaking
+                        ? 'animate-pulse bg-[#75a38a]'
+                        : 'bg-[#20211f]'
+                    : isListening
+                      ? 'animate-ping bg-[#e66b3c]'
+                      : 'bg-white'
+                }`}
+              />
+              <span className="font-mono text-[9px] font-black uppercase tracking-wider text-[#20211f]">
+                {jarvisLive
+                  ? isListening
+                    ? '🎙️ DUPLEX LISTENING · SPEAK FREELY...'
+                    : isSpeaking
+                      ? '🔊 JANS SPEAKING · TAP INTERRUPT TO SPEAK'
+                      : isThinking
+                        ? '⚡️ JANS REASONING ON RYZEN CPU...'
+                        : 'JARVIS DUPLEX ACTIVE'
+                  : isListening
+                    ? '🎙️ MICROPHONE CAPTURING AUDIO...'
+                    : isSpeaking
+                      ? '🔊 JANS SPEAKING...'
+                      : isThinking
+                        ? '⚡️ JANS REASONING...'
+                        : 'STANDBY · TAP MIC OR START DUPLEX'}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {isSpeaking && (
+                <button
+                  type="button"
+                  onClick={interruptAndListen}
+                  className="flex items-center gap-1 border-2 border-[#20211f] bg-[#e66b3c] px-2.5 py-1 font-mono text-[8px] font-black uppercase text-white shadow-[2px_2px_0_#20211f] transition active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
+                  title="Cut off Jans and speak immediately"
+                >
+                  <Icon name="close" size={10} />
+                  <span>⚡️ INTERRUPT JANS</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={toggleJarvisLive}
+                className={`flex items-center gap-1.5 border-2 border-[#20211f] px-3 py-1 font-mono text-[9px] font-black uppercase shadow-[2px_2px_0_#20211f] transition active:translate-x-[1px] active:translate-y-[1px] active:shadow-none ${
+                  jarvisLive
+                    ? 'bg-[#20211f] text-[#ffca3a]'
+                    : 'bg-white text-[#20211f] hover:bg-[#dfe5da]'
+                }`}
+                title="Toggle continuous hands-free voice loop"
+              >
+                <Icon name="mic" size={13} />
+                <span>{jarvisLive ? '🔴 DUPLEX LIVE: ON' : '▶️ START HANDS-FREE DUPLEX'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Permission warning banner if microphone blocked */}
+          {micError && (
+            <div className="border-b-2 border-[#20211f] bg-[#e66b3c] px-4 py-2 font-mono text-[9px] font-bold text-white">
+              ⚠️ {micError}
+            </div>
+          )}
+
           <div className="flex-1 space-y-4 overflow-y-auto p-4 md:p-7">
             {messages.map((message, index) => (
               <div
@@ -2075,43 +3120,103 @@ function JansView({ store, jansLevel }: { store: Store; jansLevel: number }) {
                 className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
                 <div
-                  className={`max-w-[620px] border-2 border-[#20211f] p-4 text-[11px] leading-5 ${
+                  className={`max-w-[620px] border-2 border-[#20211f] p-4 text-[11px] leading-5 whitespace-pre-wrap ${
                     message.role === 'user'
                       ? 'bg-[#20211f] text-[#f3efe3]'
                       : 'bg-[#dfe5da] shadow-[3px_3px_0_#20211f]'
                   }`}
                 >
-                  <span className="mb-2 block font-mono text-[7px] font-bold uppercase tracking-[0.15em] opacity-60">
-                    {message.role === 'user' ? 'You' : 'Jans'}
-                  </span>
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <span className="font-mono text-[7px] font-bold uppercase tracking-[0.15em] opacity-60">
+                      {message.role === 'user' ? 'You' : 'Jans'}
+                    </span>
+                    {message.role === 'assistant' && (
+                      <button
+                        type="button"
+                        onClick={() => speakText(message.content)}
+                        className="flex items-center gap-1 border border-[#20211f]/40 bg-white/80 px-1.5 py-0.5 font-mono text-[7px] font-bold uppercase text-[#20211f] transition hover:bg-white active:translate-x-[1px] active:translate-y-[1px]"
+                        title="Replay Jarvis Voice"
+                      >
+                        <Icon name="speaker" size={10} />
+                        <span>REPLAY</span>
+                      </button>
+                    )}
+                  </div>
                   {message.content}
                 </div>
               </div>
             ))}
             {sending && (
-              <p className="font-mono text-[9px] text-[#737970]">
-                Jans is organizing the thought...
-              </p>
+              <div className="flex items-center gap-2 font-mono text-[9px] text-[#737970]">
+                <span className="h-2 w-2 animate-ping bg-[#e66b3c]" />
+                <span>Jans is reasoning on Ryzen CPU...</span>
+              </div>
             )}
+            <div ref={messagesEndRef} />
           </div>
+
           <form onSubmit={sendMessage} className="border-t-2 border-[#20211f] bg-[#f3efe3] p-4">
             <div className="flex gap-2">
               <input
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
-                placeholder="Ask Jans to plan, review, research, or organize..."
-                className="min-w-0 flex-1 border-2 border-[#20211f] bg-white px-4 text-[11px] outline-none focus:bg-[#fffdf7]"
+                placeholder={
+                  jarvisLive
+                    ? isListening
+                      ? 'Listening... speak freely without touching anything...'
+                      : isSpeaking
+                        ? 'Jans is speaking (tap Interrupt to cut in)...'
+                        : isThinking
+                          ? 'Jans is reasoning...'
+                          : 'Speak your question...'
+                    : isListening
+                      ? 'Listening... speak your thought...'
+                      : isSpeaking
+                        ? 'Jans is speaking (tap mic to interrupt)...'
+                        : isThinking
+                          ? 'Jans is thinking...'
+                          : 'Ask Jans to plan, review, research, or organize...'
+                }
+                className={`min-w-0 flex-1 border-2 border-[#20211f] px-4 text-[11px] outline-none transition ${
+                  isListening
+                    ? 'border-[#e66b3c] bg-[#fff6f2] placeholder:text-[#e66b3c]'
+                    : 'bg-white focus:bg-[#fffdf7]'
+                }`}
               />
+
+              {/* Single Mic Tap or Jarvis Live */}
+              <button
+                type="button"
+                onClick={jarvisLive ? interruptAndListen : toggleManualMic}
+                className={`grid h-12 w-12 shrink-0 place-items-center border-2 border-[#20211f] shadow-[3px_3px_0_#20211f] transition active:translate-x-[2px] active:translate-y-[2px] active:shadow-none ${
+                  isListening
+                    ? 'animate-pulse bg-[#e66b3c] text-white ring-2 ring-[#e66b3c]/50'
+                    : isSpeaking
+                      ? 'bg-[#ffca3a] text-[#20211f] hover:bg-[#e66b3c] hover:text-white'
+                      : 'bg-white text-[#20211f] hover:bg-[#edf0e9]'
+                }`}
+                title={
+                  isSpeaking
+                    ? 'Interrupt Jans & Speak'
+                    : isListening
+                      ? 'Stop Listening'
+                      : 'Voice Input (Click Once to Speak)'
+                }
+                aria-label="Microphone"
+              >
+                <Icon name="mic" size={18} />
+              </button>
+
               <button
                 disabled={sending}
-                className="grid h-12 w-12 place-items-center border-2 border-[#20211f] bg-[#e66b3c] text-white shadow-[3px_3px_0_#20211f] disabled:opacity-50"
+                className="grid h-12 w-12 shrink-0 place-items-center border-2 border-[#20211f] bg-[#e66b3c] text-white shadow-[3px_3px_0_#20211f] transition active:translate-x-[2px] active:translate-y-[2px] active:shadow-none disabled:opacity-50"
                 aria-label="Send message"
               >
                 <Icon name="up" />
               </button>
             </div>
             <p className="mt-2 font-mono text-[7px] uppercase tracking-[0.1em] text-[#858a82]">
-              Local context only · Your diary text is not sent unless you paste it here
+              Ambient Jarvis Duplex · Speak naturally · 1.3s pause commits · Tap mic once to speak anytime
             </p>
           </form>
         </div>
@@ -2270,5 +3375,342 @@ function CaptureModal({
         </form>
       </div>
     </div>
+  )
+}
+
+type DocumentItem = {
+  id: string
+  filename: string
+  original_name: string
+  file_size: number
+  mime_type: string
+  label?: string
+  created_at: string
+  chunk_count?: number
+}
+
+function LibraryView({
+  setStore,
+  currentUser = 'sidd',
+}: {
+  setStore: React.Dispatch<React.SetStateAction<Store>>
+  currentUser?: 'sidd' | 'jahnavi'
+}) {
+  const [documents, setDocuments] = useState<DocumentItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [uploading, setUploading] = useState(false)
+  const [uploadLabel, setUploadLabel] = useState('')
+  const [selectedTag, setSelectedTag] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  function loadDocs() {
+    setLoading(true)
+    fetch(`/api/documents?user=${currentUser}`)
+      .then((res) => (res.ok ? res.json() : Promise.reject('Failed to load')))
+      .then((data) => setDocuments(data.documents || []))
+      .catch((err) => setError(String(err)))
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(() => {
+    loadDocs()
+  }, [currentUser])
+
+  async function handleUpload(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const files = fileInputRef.current?.files
+    if (!files || !files[0]) return
+
+    const file = files[0]
+    setUploading(true)
+    setError(null)
+
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('label', uploadLabel.trim() || 'General')
+    formData.append('user', currentUser)
+
+    try {
+      const response = await fetch('/api/documents', {
+        method: 'POST',
+        body: formData,
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Upload failed')
+
+      // Award +50 Knowledge XP for indexing a technical document
+      setStore((current) => ({
+        ...current,
+        knowledgeXp: (current.knowledgeXp || 0) + 50,
+      }))
+
+      if (fileInputRef.current) fileInputRef.current.value = ''
+      setUploadLabel('')
+      loadDocs()
+    } catch (err: any) {
+      setError(err?.message || 'Failed to upload document')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  async function handleEditLabel(doc: DocumentItem) {
+    const next = prompt(`Set tag for "${doc.original_name}":`, doc.label || 'General')
+    if (next === null) return
+    const clean = next.replace(/^#/, '').trim() || 'General'
+    try {
+      await fetch(`/api/documents/${doc.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label: clean }),
+      })
+      setDocuments((current) =>
+        current.map((d) => (d.id === doc.id ? { ...d, label: clean } : d)),
+      )
+    } catch {
+      alert('Failed to update document tag')
+    }
+  }
+
+  async function handleDelete(id: string, name: string) {
+    if (!confirm(`Delete "${name}" from library and database index?`)) return
+    try {
+      await fetch(`/api/documents/${id}`, { method: 'DELETE' })
+      setDocuments((current) => current.filter((doc) => doc.id !== id))
+    } catch {
+      alert('Failed to delete document')
+    }
+  }
+
+  function formatBytes(bytes: number) {
+    if (bytes === 0) return '0 Bytes'
+    const k = 1024
+    const sizes = ['Bytes', 'KB', 'MB', 'GB']
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`
+  }
+
+  const allTags = Array.from(
+    new Set(documents.map((d) => (d.label || 'General').trim())),
+  ).filter(Boolean)
+
+  const filtered = documents.filter((doc) => {
+    const matchesSearch =
+      doc.original_name.toLowerCase().includes(search.toLowerCase()) ||
+      (doc.label && doc.label.toLowerCase().includes(search.toLowerCase()))
+    const matchesTag = selectedTag ? (doc.label || 'General') === selectedTag : true
+    return matchesSearch && matchesTag
+  })
+
+  const totalSize = documents.reduce((sum, d) => sum + d.file_size, 0)
+  const totalChunks = documents.reduce((sum, d) => sum + (d.chunk_count || 0), 0)
+
+  return (
+    <>
+      <PageHeading
+        index="09"
+        title="Document library"
+        description="PDF lecture slides, technical textbooks, and research papers organized by tags and indexed in SQLite FTS5 for Jans."
+      />
+
+      <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
+        {/* Upload & Tag Section */}
+        <section className="border-2 border-[#20211f] bg-white shadow-[4px_4px_0_#20211f]">
+          <div className="border-b-2 border-[#20211f] bg-[#dfe5da] p-4 flex items-center justify-between">
+            <div>
+              <h2 className="text-[15px] font-black">Add document (PDF)</h2>
+              <p className="mt-1 text-[9px] text-[#6d746c]">
+                Assign a tag like #Physics or #OS so Jans can instantly organize and reference it.
+              </p>
+            </div>
+            <span className="font-mono text-[8px] font-black uppercase bg-[#75a38a] text-white px-2 py-0.5 border border-[#20211f]">
+              +50 Knowledge XP
+            </span>
+          </div>
+
+          <form onSubmit={handleUpload} className="p-4 md:p-6">
+            <div className="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,application/pdf"
+                required
+                className="flex-1 border-2 border-[#20211f] bg-[#f3efe3] p-2 text-[11px] font-mono file:mr-3 file:border-2 file:border-[#20211f] file:bg-white file:px-3 file:py-1 file:font-mono file:text-[9px] file:font-bold file:uppercase cursor-pointer"
+              />
+              <input
+                value={uploadLabel}
+                onChange={(e) => setUploadLabel(e.target.value)}
+                placeholder="Tag (e.g. Physics, OS)"
+                className="h-11 border-2 border-[#20211f] bg-white px-3 font-mono text-[10px] outline-none sm:w-44"
+              />
+              <button
+                type="submit"
+                disabled={uploading}
+                className="h-11 border-2 border-[#20211f] bg-[#ffca3a] px-5 font-mono text-[9px] font-black uppercase shadow-[3px_3px_0_#20211f] disabled:opacity-50 hover:bg-[#ffbe1a]"
+              >
+                {uploading ? 'Indexing...' : 'Index PDF'}
+              </button>
+            </div>
+            {error && <p className="mt-3 text-[10px] font-bold text-[#b34e2d]">{error}</p>}
+          </form>
+        </section>
+
+        {/* Storage Telemetry */}
+        <section className="border-2 border-[#20211f] bg-[#ffca3a] p-5 shadow-[4px_4px_0_#20211f] flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-[8px] font-black uppercase tracking-[0.14em]">
+                SQLite Telemetry
+              </span>
+              <span className="font-mono text-[7px] font-bold bg-[#20211f] text-white px-1.5 py-0.5">
+                WAL Mode
+              </span>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-2 border-t-2 border-[#20211f] pt-4">
+              <div>
+                <strong className="block text-2xl font-black">{documents.length}</strong>
+                <small className="font-mono text-[7px] uppercase font-bold text-[#20211f]/70">
+                  Documents
+                </small>
+              </div>
+              <div>
+                <strong className="block text-2xl font-black">{formatBytes(totalSize)}</strong>
+                <small className="font-mono text-[7px] uppercase font-bold text-[#20211f]/70">
+                  Disk Stored
+                </small>
+              </div>
+            </div>
+          </div>
+          <div className="mt-4 pt-3 border-t border-[#20211f]/30">
+            <p className="font-mono text-[8px] leading-4 text-[#20211f]">
+              <strong>{totalChunks} text chunks</strong> indexed in FTS5 table for instant semantic recall by tag or query.
+            </p>
+          </div>
+        </section>
+      </div>
+
+      {/* Document Library Grid with Tag Filtering */}
+      <section className="mt-8 border-2 border-[#20211f] bg-white shadow-[4px_4px_0_#20211f]">
+        <div className="border-b-2 border-[#20211f] bg-[#dfe5da] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <h2 className="text-[15px] font-black">Indexed documents</h2>
+            <span className="font-mono text-[8px] font-bold bg-[#20211f] text-white px-1.5 py-0.5">
+              {filtered.length}
+            </span>
+          </div>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by title or tag..."
+            className="h-9 border-2 border-[#20211f] bg-white px-3 text-[11px] outline-none sm:w-64"
+          />
+        </div>
+
+        <div className="p-4 md:p-6">
+          {/* Tag Filter Pills */}
+          {allTags.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 border-b border-[#20211f]/20 pb-4 mb-5">
+              <span className="font-mono text-[8px] uppercase font-bold text-[#6d746c] mr-1">
+                Filter:
+              </span>
+              <button
+                type="button"
+                onClick={() => setSelectedTag(null)}
+                className={`border border-[#20211f] px-2.5 py-1 font-mono text-[8px] font-black uppercase ${
+                  selectedTag === null ? 'bg-[#20211f] text-white' : 'bg-white hover:bg-[#dfe5da]'
+                }`}
+              >
+                All ({documents.length})
+              </button>
+              {allTags.map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => setSelectedTag(selectedTag === tag ? null : tag)}
+                  className={`border border-[#20211f] px-2.5 py-1 font-mono text-[8px] font-black uppercase ${
+                    selectedTag === tag ? 'bg-[#ffca3a] text-[#20211f]' : 'bg-white hover:bg-[#dfe5da]'
+                  }`}
+                >
+                  #{tag} ({documents.filter((d) => (d.label || 'General') === tag).length})
+                </button>
+              ))}
+            </div>
+          )}
+
+          {loading ? (
+            <p className="py-8 text-center font-mono text-[10px] text-[#737970]">
+              Querying SQLite database...
+            </p>
+          ) : filtered.length === 0 ? (
+            <div className="py-12 text-center">
+              <p className="text-[13px] font-black text-[#20211f]">No documents found.</p>
+              <p className="mt-1 text-[10px] text-[#737970] max-w-md mx-auto">
+                {selectedTag
+                  ? `No documents found under tag #${selectedTag}.`
+                  : 'Upload course lecture slides or papers above with tags like #Physics or #OS.'}
+              </p>
+            </div>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {filtered.map((doc) => (
+                <article
+                  key={doc.id}
+                  className="border-2 border-[#20211f] bg-[#f3efe3] p-4 shadow-[2px_2px_0_#20211f] flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-mono text-[7px] font-black uppercase bg-[#20211f] text-white px-1.5 py-0.5">
+                          PDF
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleEditLabel(doc)}
+                          title="Click to rename tag"
+                          className="font-mono text-[8px] font-black uppercase bg-[#ffca3a] text-[#20211f] px-2 py-0.5 border border-[#20211f] hover:bg-[#ffbe1a]"
+                        >
+                          #{doc.label || 'General'} ✎
+                        </button>
+                      </div>
+                      <span className="font-mono text-[8px] text-[#737970]">
+                        {new Date(doc.created_at).toLocaleDateString()}
+                      </span>
+                    </div>
+                    <h3 className="mt-2 text-[12px] font-black leading-4 text-[#20211f] line-clamp-2">
+                      {doc.original_name}
+                    </h3>
+                    <div className="mt-3 flex items-center gap-2 font-mono text-[8px] text-[#737970]">
+                      <span>{formatBytes(doc.file_size)}</span>
+                      <span>·</span>
+                      <span>{doc.chunk_count || 0} FTS chunks</span>
+                    </div>
+                  </div>
+
+                  <div className="mt-5 pt-3 border-t border-[#20211f]/20 flex items-center justify-between gap-2">
+                    <a
+                      href={`/api/documents/${doc.id}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex-1 text-center border-2 border-[#20211f] bg-white py-1.5 font-mono text-[8px] font-black uppercase hover:bg-[#ffca3a]"
+                    >
+                      Preview PDF ↗
+                    </a>
+                    <button
+                      onClick={() => handleDelete(doc.id, doc.original_name)}
+                      className="grid w-8 h-8 place-items-center border-2 border-[#20211f] bg-white hover:bg-[#e66b3c] hover:text-white"
+                      aria-label="Delete document"
+                    >
+                      <Icon name="trash" size={13} />
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
+    </>
   )
 }

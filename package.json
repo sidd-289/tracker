@@ -20,11 +20,13 @@
     "@payloadcms/richtext-lexical": "4.0.0-beta.8",
     "@payloadcms/translations": "4.0.0-beta.8",
     "@payloadcms/ui": "4.0.0-beta.8",
+    "@types/pdf-parse": "^1.1.5",
     "graphql": "^16.8.1",
     "html-react-parser": "^5.2.10",
     "monaco-editor": "0.55.1",
     "next": "16.4.2",
     "payload": "4.0.0-beta.8",
+    "pdf-parse": "^2.4.5",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "sharp": "^0.35.4"

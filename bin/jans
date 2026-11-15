@@ -1,0 +1,212 @@
+#!/usr/bin/env python3
+"""
+Jans CLI - Headless Terminal Interface for Jans AI
+Direct socket streaming from your AMD Ryzen Linux companion (fedora:11434)
+Zero browser footprint. Supports standard Unix pipes and interactive REPL.
+"""
+
+import sys
+import os
+import json
+from urllib.request import Request, urlopen
+from urllib.error import URLError
+
+DEFAULT_HOSTS = [
+    os.getenv("JANS_URL"),
+    "http://fedora:11434",
+    "http://fedora.local:11434",
+    "http://localhost:11434",
+]
+FALLBACK_HOSTS = [h for h in DEFAULT_HOSTS if h]
+MODEL_NAME = os.getenv("JANS_MODEL", "jans:latest")
+
+SYSTEM_PROMPT = """You are Jans, Siddhant's personal AI engineering companion, study partner, and accountability wingman running natively on his AMD Ryzen Linux machine (fedora).
+Help Siddhant plan, research, organize information, master systems architecture, and keep commitments realistic.
+Be concise, practical, calm, and high-signal. Address him as Siddhant."""
+
+def find_document_context(query):
+    db_path = "/Users/sidd/Documents/jans-track/tracker/data/jans.db"
+    if not os.path.exists(db_path):
+        return ""
+    try:
+        import sqlite3
+        con = sqlite3.connect(db_path)
+        cur = con.cursor()
+
+        all_docs = cur.execute(
+            "SELECT original_name, label FROM documents ORDER BY created_at DESC"
+        ).fetchall()
+        if not all_docs:
+            con.close()
+            return ""
+
+        library_dir = "Available Library Documents:\n" + "\n".join(
+            f'- "{d[0]}" [Tag: #{d[1] or "General"}]' for d in all_docs
+        )
+
+        STOPWORDS = set([
+            "how", "many", "what", "is", "are", "the", "in", "of", "to", "a", "an", "and", "or",
+            "for", "on", "with", "about", "my", "your", "tell", "me", "can", "you", "give", "do",
+            "does", "did", "this", "that", "there", "from", "it", "its", "look", "under", "check"
+        ])
+        words = [
+            w.lstrip("#") for w in "".join(c if c.isalnum() or c.isspace() or c == "#" else " " for c in query.lower()).split()
+            if len(w.lstrip("#")) > 1 and w.lstrip("#") not in STOPWORDS
+        ]
+
+        rows = []
+        if words:
+            fts_q = " OR ".join(f"{w}*" for w in words)
+            try:
+                rows = cur.execute(
+                    "SELECT title, label, content FROM fts_documents WHERE fts_documents MATCH ? LIMIT 6",
+                    (fts_q,)
+                ).fetchall()
+            except Exception:
+                pass
+
+        lower_q = query.lower()
+        is_doc_ref = any(
+            k in lower_q for k in ("pdf", "assignment", "document", "upload", "question", "qpa", "paper", "tag", "label")
+        ) or any(d[1] and d[1].lower() in lower_q for d in all_docs)
+
+        if not rows or is_doc_ref:
+            fallback = cur.execute(
+                "SELECT d.original_name, d.label, c.content FROM documents d JOIN document_chunks c ON d.id = c.document_id ORDER BY d.created_at DESC, c.chunk_index ASC LIMIT 8"
+            ).fetchall()
+            if fallback:
+                rows = fallback
+
+        con.close()
+        if not rows:
+            return ""
+        excerpts = [f'[Source: "{r[0]}" | Tag: #{r[1] or "General"}]:\n{r[2]}' for r in rows]
+        return (
+            "\n\n=== SIDDHANT\'S INDEXED DOCUMENTS & PDF CONTENT (Authoritative Ground Truth) ===\n" +
+            library_dir + "\n\nExcerpts:\n" +
+            "\n---\n".join(excerpts) +
+            "\n=== END OF DOCUMENT CONTEXT ===\n" +
+            "CRITICAL INSTRUCTION: Answer Siddhant\'s question strictly using the document content above. If Siddhant asks for a tag (e.g. #Physics), reference the documents under that tag. Cite exact numbers, questions, and topics from the document without guessing or hallucinating."
+        )
+    except Exception:
+        return ""
+
+def find_active_host():
+    for host in FALLBACK_HOSTS:
+        try:
+            req = Request(f"{host}/api/tags", headers={"User-Agent": "JansCLI/1.0"})
+            with urlopen(req, timeout=2.0) as res:
+                if res.status == 200:
+                    return host
+        except Exception:
+            continue
+    return None
+
+def stream_chat(host, messages):
+    payload = {
+        "model": MODEL_NAME,
+        "messages": messages,
+        "stream": True,
+        "options": {
+            "temperature": 0.65,
+        }
+    }
+    req = Request(
+        f"{host}/api/chat",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"}
+    )
+    
+    full_response = []
+    try:
+        with urlopen(req, timeout=60.0) as response:
+            for line in response:
+                if not line:
+                    continue
+                try:
+                    chunk = json.loads(line.decode("utf-8"))
+                    content = chunk.get("message", {}).get("content", "")
+                    if content:
+                        sys.stdout.write(content)
+                        sys.stdout.flush()
+                        full_response.append(content)
+                except json.JSONDecodeError:
+                    continue
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+        return "".join(full_response)
+    except URLError as err:
+        sys.stderr.write(f"\n[Jans Network Error]: {err.reason}\n")
+        return None
+    except KeyboardInterrupt:
+        sys.stdout.write("\n[Interrupted]\n")
+        return "".join(full_response)
+
+def main():
+    host = find_active_host()
+    if not host:
+        sys.stderr.write(
+            "\x1b[31;1mError:\x1b[0m Jans host is unreachable.\n"
+            "Ensure your AMD Linux machine ('fedora') is awake and connected via Wi-Fi or Tailscale.\n"
+        )
+        sys.exit(1)
+
+    # Check if input is piped through stdin (e.g. cat file.log | jans "summarize")
+    piped_data = ""
+    if not sys.stdin.isatty():
+        try:
+            piped_data = sys.stdin.read().strip()
+        except Exception:
+            pass
+
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+
+    # 1. Pipeline or Single-shot argument mode
+    if args or piped_data:
+        user_text = " ".join(args).strip()
+        if piped_data and user_text:
+            prompt_content = f"Context from stdin:\n```\n{piped_data}\n```\n\nTask: {user_text}"
+        elif piped_data:
+            prompt_content = f"Inspect and explain this input:\n```\n{piped_data}\n```"
+        else:
+            prompt_content = user_text
+
+        doc_context = find_document_context(prompt_content)
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT + doc_context},
+            {"role": "user", "content": prompt_content}
+        ]
+        stream_chat(host, messages)
+        return
+
+    # 2. Interactive REPL Mode
+    print(f"\x1b[1mJans Terminal Console\x1b[0m · Connected to \x1b[32m{host}\x1b[0m ({MODEL_NAME})")
+    print("Type your message, or 'exit' / Ctrl+C to quit.\n")
+
+    history = [{"role": "system", "content": SYSTEM_PROMPT}]
+
+    while True:
+        try:
+            user_input = input("\x1b[33;1mjans >\x1b[0m ").strip()
+            if not user_input:
+                continue
+            if user_input.lower() in ("exit", "quit", "q"):
+                print("Logging off.")
+                break
+
+            doc_context = find_document_context(user_input)
+            history.append({"role": "user", "content": user_input})
+            active_messages = [
+                {"role": "system", "content": SYSTEM_PROMPT + doc_context},
+                *history[1:][-8:]
+            ]
+            reply = stream_chat(host, active_messages)
+            if reply:
+                history.append({"role": "assistant", "content": reply})
+            print()
+        except (KeyboardInterrupt, EOFError):
+            print("\nExiting.")
+            break
+
+if __name__ == "__main__":
+    main()
