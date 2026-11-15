@@ -28,7 +28,7 @@ export default buildFigmaConfig({
   },
   i18n: {
     fallbackLanguage: 'en',
-    supportedLanguages: { 'en': adminLanguage },
+    supportedLanguages: { en: adminLanguage },
   },
   collections: [Admins, Media, Folders, Tags],
   typescript: {

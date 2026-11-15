@@ -1,8 +1,8 @@
-import { getPayload } from "payload"
-import config from "@payload-config"
-import type { Config } from "@/payload-types"
+import { getPayload } from 'payload'
+import config from '@payload-config'
+import type { Config } from '@/payload-types'
 
-type CollectionSlug = keyof Config["collections"]
+type CollectionSlug = keyof Config['collections']
 
 /**
  * Get the Payload instance configured for this project.
@@ -43,7 +43,7 @@ export async function findBySlug<T extends CollectionSlug>(
     /** Relationship population depth (default: 2) */
     depth?: number
   },
-): Promise<Config["collections"][T] | null> {
+): Promise<Config['collections'][T] | null> {
   const payload = await getPayloadClient()
   const { draft = false, depth = 2 } = options ?? {}
 
@@ -58,7 +58,7 @@ export async function findBySlug<T extends CollectionSlug>(
     draft,
   })
 
-  return result.docs[0] as Config["collections"][T] ?? null
+  return (result.docs[0] as Config['collections'][T]) ?? null
 }
 
 /**
@@ -91,7 +91,7 @@ export async function findByField<T extends CollectionSlug>(
     /** Relationship population depth (default: 2) */
     depth?: number
   },
-): Promise<Config["collections"][T] | null> {
+): Promise<Config['collections'][T] | null> {
   const payload = await getPayloadClient()
   const { draft = false, depth = 2 } = options ?? {}
 
@@ -106,5 +106,5 @@ export async function findByField<T extends CollectionSlug>(
     draft,
   })
 
-  return result.docs[0] as Config["collections"][T] ?? null
+  return (result.docs[0] as Config['collections'][T]) ?? null
 }
