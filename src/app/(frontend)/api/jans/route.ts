@@ -1,4 +1,5 @@
-import { getSmartDocumentContext } from '@/lib/db'
+import { getSmartDocumentContext, getSmartMemoryContext } from '@/lib/db'
+import { consolidateMemoryAsync } from '@/lib/memory'
 
 const fallbackHosts = [
   process.env.JANS_URL,
@@ -79,6 +80,7 @@ export async function POST(request: Request) {
 
     const userQuery = body.messages[body.messages.length - 1]?.content || ''
     const documentContext = getSmartDocumentContext(userQuery, userId)
+    const memoryContext = getSmartMemoryContext(userQuery, userId)
 
     const systemPrompt = isJahnavi
       ? `You are Jans, Jahnavi's personal AI companion, study partner, and wingman running natively on Siddhant's AMD Ryzen Linux machine.
@@ -86,12 +88,12 @@ Siddhant custom built this entire private system and companion especially for Ja
 Help Jahnavi organize her day, plan her study, master her concepts, stay calm, and keep her commitments realistic.
 Be warm, encouraging, thoughtful, practical, and high-signal. Address her as Jahnavi.
 Keep answers concise, direct, and conversational (1 to 3 punchy sentences, avoiding markdown bullet walls or headers) so voice synthesis sounds natural and quick.
-${body.context ? `\nJahnavi's current workspace context:\n${body.context}` : ''}${documentContext}`
+${body.context ? `\nJahnavi's current workspace context:\n${body.context}` : ''}${memoryContext}${documentContext}`
       : `You are Jans, Siddhant's personal AI engineering companion, study partner, and accountability wingman running natively on his AMD Ryzen Linux machine (fedora).
 Help Siddhant plan, research, organize information, master systems architecture, and keep commitments realistic.
 Be concise, practical, calm, and high-signal. Address him as Siddhant.
 Keep conversational responses punchy, direct, and conversational (1 to 3 punchy sentences, avoiding markdown bullet walls or headers) so voice synthesis sounds natural, snappy, and clear like Jarvis.
-${body.context ? `\nSiddhant's current workspace context:\n${body.context}` : ''}${documentContext}`
+${body.context ? `\nSiddhant's current workspace context:\n${body.context}` : ''}${memoryContext}${documentContext}`
 
     const messagesToSend = [
       { role: 'system', content: systemPrompt },
@@ -122,6 +124,16 @@ ${body.context ? `\nSiddhant's current workspace context:\n${body.context}` : ''
 
     const data = await response.json()
     const reply = data?.message?.content || "Standing by, Siddhant. What are we organizing or building?"
+
+    // Asynchronously crystallize durable long-term memories in background (non-blocking)
+    consolidateMemoryAsync({
+      userMessage: userQuery,
+      assistantReply: reply,
+      userId,
+      host,
+    }).catch((err) => {
+      console.error('Non-blocking memory consolidation error:', err)
+    })
 
     return Response.json({ reply, host })
   } catch (error: any) {

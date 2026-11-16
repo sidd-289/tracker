@@ -1,6 +1,6 @@
 'use client'
 
-import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 type Section =
   | 'Today'
@@ -2457,6 +2457,76 @@ function JansView({
   const [engineState, setEngineState] = useState<'idle' | 'listening' | 'thinking' | 'speaking' | 'cooldown'>('idle')
   const [micError, setMicError] = useState<string | null>(null)
 
+  // Lifelong Episodic Memory State
+  type MemoryItem = {
+    id: string
+    user_id: string
+    category: string
+    fact: string
+    importance: number
+    tags: string
+    source: string
+    created_at: string
+    updated_at: string
+  }
+  const [memories, setMemories] = useState<MemoryItem[]>([])
+  const [showMemoryConsole, setShowMemoryConsole] = useState(false)
+  const [newFact, setNewFact] = useState('')
+  const [newCategory, setNewCategory] = useState('goal')
+  const [newImportance, setNewImportance] = useState(4)
+  const [savingMemory, setSavingMemory] = useState(false)
+
+  const loadMemories = useCallback(() => {
+    fetch(`/api/memories?user=${currentUser}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (Array.isArray(d.memories)) setMemories(d.memories)
+      })
+      .catch(() => {})
+  }, [currentUser])
+
+  useEffect(() => {
+    loadMemories()
+  }, [loadMemories])
+
+  async function handleSaveMemory(e: FormEvent) {
+    e.preventDefault()
+    if (!newFact.trim() || savingMemory) return
+    setSavingMemory(true)
+    try {
+      const res = await fetch('/api/memories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user: currentUser,
+          category: newCategory,
+          fact: newFact.trim(),
+          importance: newImportance,
+          source: 'manual',
+        }),
+      })
+      const data = await res.json()
+      if (data.memory) {
+        setMemories((prev) => [data.memory, ...prev.filter((m) => m.id !== data.memory.id)])
+        setNewFact('')
+      }
+    } catch (err) {
+      console.error('Failed to save memory', err)
+    } finally {
+      setSavingMemory(false)
+    }
+  }
+
+  async function handleDeleteMemory(id: string) {
+    try {
+      setMemories((prev) => prev.filter((m) => m.id !== id))
+      await fetch(`/api/memories?id=${id}`, { method: 'DELETE' })
+    } catch (err) {
+      console.error('Failed to delete memory', err)
+      loadMemories()
+    }
+  }
+
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const recognitionRef = useRef<any>(null)
   const silenceTimerRef = useRef<any>(null)
@@ -2850,6 +2920,8 @@ function JansView({
       const reply = data.reply
       setMessages((current) => [...current, { role: 'assistant', content: reply }])
       setOnline(true)
+      // Automatically refresh memories consolidated in the background
+      setTimeout(loadMemories, 3500)
 
       // Spoken voice reply
       if (voiceEnabled && reply) {
@@ -3039,6 +3111,32 @@ function JansView({
               </div>
             </div>
           </div>
+
+          {/* Lifelong Episodic Memory Card */}
+          <div className="mt-4 border-t-2 border-[#20211f] pt-4">
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-[8px] font-black uppercase tracking-[0.14em] text-[#20211f]">
+                Lifelong Brain
+              </span>
+              <span className="border border-[#20211f] bg-[#20211f] px-1.5 py-0.5 font-mono text-[8px] font-bold text-[#ffca3a]">
+                {memories.length} FACTS
+              </span>
+            </div>
+            <p className="mt-1 text-[9px] leading-3 text-[#52564e]">
+              Persistent episodic memory stored in local SQLite WAL. Retained across all sessions.
+            </p>
+            <button
+              type="button"
+              onClick={() => setShowMemoryConsole((prev) => !prev)}
+              className={`mt-2.5 flex w-full items-center justify-center gap-1.5 border-2 border-[#20211f] px-3 py-1.5 font-mono text-[8px] font-black uppercase shadow-[2px_2px_0_#20211f] transition active:translate-x-[1px] active:translate-y-[1px] ${
+                showMemoryConsole
+                  ? 'bg-[#e66b3c] text-white'
+                  : 'bg-[#20211f] text-[#ffca3a] hover:bg-[#343532]'
+              }`}
+            >
+              <span>{showMemoryConsole ? '✕ CLOSE BRAIN' : '🧠 OPEN MEMORY BRAIN'}</span>
+            </button>
+          </div>
         </aside>
 
         <div className="flex min-h-[560px] flex-col">
@@ -3092,6 +3190,19 @@ function JansView({
 
               <button
                 type="button"
+                onClick={() => setShowMemoryConsole((prev) => !prev)}
+                className={`flex items-center gap-1 border-2 border-[#20211f] px-2.5 py-1 font-mono text-[9px] font-black uppercase shadow-[2px_2px_0_#20211f] transition active:translate-x-[1px] active:translate-y-[1px] active:shadow-none ${
+                  showMemoryConsole
+                    ? 'bg-[#20211f] text-[#ffca3a]'
+                    : 'bg-white text-[#20211f] hover:bg-[#dfe5da]'
+                }`}
+                title="View what Jans remembers about you"
+              >
+                <span>🧠 BRAIN ({memories.length})</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={toggleJarvisLive}
                 className={`flex items-center gap-1.5 border-2 border-[#20211f] px-3 py-1 font-mono text-[9px] font-black uppercase shadow-[2px_2px_0_#20211f] transition active:translate-x-[1px] active:translate-y-[1px] active:shadow-none ${
                   jarvisLive
@@ -3105,6 +3216,124 @@ function JansView({
               </button>
             </div>
           </div>
+
+          {/* Transparent Memory Bank Console */}
+          {showMemoryConsole && (
+            <div className="border-b-2 border-[#20211f] bg-[#f3efe3] p-4">
+              <div className="flex items-center justify-between border-b-2 border-[#20211f] pb-3">
+                <div>
+                  <h4 className="font-mono text-[10px] font-black uppercase tracking-wider text-[#20211f]">
+                    🧠 Jans Episodic Brain · {isJahnavi ? 'Jahnavi' : 'Siddhant'}
+                  </h4>
+                  <p className="mt-0.5 text-[11px] text-[#555a50]">
+                    Authoritative lifelong memory bank. Queried via FTS5 full-text indexing before every response.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowMemoryConsole(false)}
+                  className="border border-[#20211f] bg-white px-2 py-0.5 font-mono text-[9px] font-bold uppercase text-[#20211f] shadow-[1px_1px_0_#20211f] hover:bg-[#ffca3a]"
+                >
+                  Close
+                </button>
+              </div>
+
+              {/* Quick Memory Injection Form */}
+              <form onSubmit={handleSaveMemory} className="mt-3 grid gap-2 md:grid-cols-[1fr_120px_110px_auto]">
+                <input
+                  type="text"
+                  placeholder={`Teach Jans a permanent fact about ${isJahnavi ? 'Jahnavi' : 'Siddhant'}...`}
+                  value={newFact}
+                  onChange={(e) => setNewFact(e.target.value)}
+                  className="border-2 border-[#20211f] bg-white px-3 py-1.5 text-[11px] outline-none focus:bg-[#fffdf7]"
+                />
+                <select
+                  value={newCategory}
+                  onChange={(e) => setNewCategory(e.target.value)}
+                  className="border-2 border-[#20211f] bg-white px-2 py-1.5 font-mono text-[9px] font-bold text-[#20211f] outline-none"
+                >
+                  <option value="goal">Goal</option>
+                  <option value="milestone">Milestone</option>
+                  <option value="struggle">Struggle</option>
+                  <option value="preference">Preference</option>
+                  <option value="study">Study</option>
+                  <option value="habit">Habit</option>
+                  <option value="project">Project</option>
+                  <option value="general">General</option>
+                </select>
+                <select
+                  value={newImportance}
+                  onChange={(e) => setNewImportance(Number(e.target.value))}
+                  className="border-2 border-[#20211f] bg-white px-2 py-1.5 font-mono text-[9px] font-bold text-[#20211f] outline-none"
+                >
+                  <option value={5}>★★★★★ (Core)</option>
+                  <option value={4}>★★★★ (High)</option>
+                  <option value={3}>★★★ (Normal)</option>
+                  <option value={2}>★★ (Low)</option>
+                  <option value={1}>★ (Minor)</option>
+                </select>
+                <button
+                  type="submit"
+                  disabled={savingMemory || !newFact.trim()}
+                  className="border-2 border-[#20211f] bg-[#ffca3a] px-3 py-1.5 font-mono text-[9px] font-black uppercase text-[#20211f] shadow-[2px_2px_0_#20211f] transition hover:bg-[#ffe380] active:translate-x-[1px] active:translate-y-[1px] disabled:opacity-50"
+                >
+                  {savingMemory ? 'Saving...' : '+ Teach'}
+                </button>
+              </form>
+
+              {/* Memory List */}
+              <div className="mt-3 max-h-[220px] space-y-2 overflow-y-auto pr-1">
+                {memories.length === 0 ? (
+                  <div className="border border-dashed border-[#20211f] p-4 text-center font-mono text-[10px] text-[#737970]">
+                    No memories stored yet. Talk with Jans or manually teach a goal/milestone above!
+                  </div>
+                ) : (
+                  memories.map((mem) => {
+                    const badgeBg =
+                      mem.category === 'goal'
+                        ? 'bg-[#ffca3a] text-[#20211f]'
+                        : mem.category === 'milestone'
+                        ? 'bg-[#dfe5da] text-[#20211f]'
+                        : mem.category === 'struggle'
+                        ? 'bg-[#e66b3c] text-white'
+                        : mem.category === 'preference'
+                        ? 'bg-[#20211f] text-[#ffca3a]'
+                        : 'bg-white text-[#20211f]'
+
+                    return (
+                      <div
+                        key={mem.id}
+                        className="flex items-start justify-between gap-3 border-2 border-[#20211f] bg-white p-2.5 shadow-[2px_2px_0_#20211f]"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className={`border border-[#20211f] px-1.5 py-0.5 font-mono text-[7px] font-black uppercase ${badgeBg}`}>
+                              {mem.category}
+                            </span>
+                            <span className="font-mono text-[8px] font-bold text-[#e66b3c]">
+                              {'★'.repeat(mem.importance)}
+                            </span>
+                            <span className="font-mono text-[7px] text-[#858a82]">
+                              {mem.source === 'auto' ? '⚡ Auto-Consolidated' : '✍️ Manual'}
+                            </span>
+                          </div>
+                          <p className="mt-1 text-[11px] font-medium leading-4 text-[#20211f]">{mem.fact}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteMemory(mem.id)}
+                          className="shrink-0 border border-[#20211f] p-1 text-[#8b4c36] transition hover:bg-[#e66b3c] hover:text-white"
+                          title="Purge memory"
+                        >
+                          <Icon name="trash" size={11} />
+                        </button>
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Permission warning banner if microphone blocked */}
           {micError && (

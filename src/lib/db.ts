@@ -69,10 +69,22 @@ function initSchema(db: DatabaseSync) {
     CREATE TABLE IF NOT EXISTS memories (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL DEFAULT 'sidd',
-      key TEXT NOT NULL,
-      value TEXT NOT NULL,
-      category TEXT NOT NULL,
-      created_at TEXT NOT NULL
+      category TEXT NOT NULL DEFAULT 'general',
+      fact TEXT NOT NULL,
+      importance INTEGER DEFAULT 3,
+      tags TEXT DEFAULT '',
+      source TEXT DEFAULT 'auto',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    -- Full-Text Search index for episodic memories
+    CREATE VIRTUAL TABLE IF NOT EXISTS fts_memories USING fts5(
+      memory_id,
+      user_id,
+      category,
+      fact,
+      tags
     );
   `)
 
@@ -82,6 +94,32 @@ function initSchema(db: DatabaseSync) {
   } catch {}
   try {
     db.exec(`ALTER TABLE memories ADD COLUMN user_id TEXT DEFAULT 'sidd';`)
+  } catch {}
+  try {
+    db.exec(`ALTER TABLE memories ADD COLUMN category TEXT DEFAULT 'general';`)
+  } catch {}
+  try {
+    db.exec(`ALTER TABLE memories ADD COLUMN fact TEXT;`)
+  } catch {}
+  try {
+    db.exec(`ALTER TABLE memories ADD COLUMN importance INTEGER DEFAULT 3;`)
+  } catch {}
+  try {
+    db.exec(`ALTER TABLE memories ADD COLUMN tags TEXT DEFAULT '';`)
+  } catch {}
+  try {
+    db.exec(`ALTER TABLE memories ADD COLUMN source TEXT DEFAULT 'auto';`)
+  } catch {}
+  try {
+    db.exec(`ALTER TABLE memories ADD COLUMN updated_at TEXT;`)
+  } catch {}
+  try {
+    db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS fts_memories USING fts5(memory_id, user_id, category, fact, tags);`)
+  } catch {}
+  try {
+    // Backfill any legacy records
+    db.exec(`UPDATE memories SET fact = value WHERE fact IS NULL AND value IS NOT NULL;`)
+    db.exec(`UPDATE memories SET updated_at = created_at WHERE updated_at IS NULL;`)
   } catch {}
 }
 
@@ -387,4 +425,230 @@ export function saveWorkspaceState(data: any, userId: string = 'sidd') {
       updated_at = excluded.updated_at
   `)
   stmt.run(key, JSON.stringify(data), new Date().toISOString())
+}
+
+export type MemoryCategory =
+  | 'goal'
+  | 'milestone'
+  | 'struggle'
+  | 'preference'
+  | 'study'
+  | 'habit'
+  | 'project'
+  | 'relationship'
+  | 'general'
+
+export type MemoryRecord = {
+  id: string
+  user_id: string
+  category: MemoryCategory
+  fact: string
+  importance: number // 1 to 5
+  tags: string // comma-separated e.g. "dsa, leetcode"
+  source: 'auto' | 'manual'
+  created_at: string
+  updated_at: string
+}
+
+export function listMemories(userId: string = 'sidd', limit: number = 100): MemoryRecord[] {
+  const db = getDb()
+  const cleanUser = userId.toLowerCase() === 'jahnavi' ? 'jahnavi' : 'sidd'
+  const stmt = db.prepare(`
+    SELECT id, user_id, category, fact, importance, tags, source, created_at, updated_at
+    FROM memories
+    WHERE COALESCE(user_id, 'sidd') = ? AND fact IS NOT NULL AND TRIM(fact) != ''
+    ORDER BY importance DESC, updated_at DESC
+    LIMIT ?
+  `)
+  return stmt.all(cleanUser, limit) as MemoryRecord[]
+}
+
+export function insertMemory(
+  userId: string = 'sidd',
+  category: string,
+  fact: string,
+  importance: number = 3,
+  tags: string = '',
+  source: 'auto' | 'manual' = 'auto',
+): MemoryRecord {
+  const db = getDb()
+  const cleanUser = userId.toLowerCase() === 'jahnavi' ? 'jahnavi' : 'sidd'
+  const id = `mem_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+  const now = new Date().toISOString()
+  const cleanCategory = (category || 'general').toLowerCase() as MemoryCategory
+  const cleanFact = fact.trim()
+  const cleanTags = (tags || '').toLowerCase().trim()
+  const validImportance = Math.min(5, Math.max(1, Math.round(importance || 3)))
+
+  // Deduplication check: if a memory with identical or very similar fact exists, bump importance & timestamp
+  const existing = db.prepare(`
+    SELECT id, fact, importance FROM memories
+    WHERE COALESCE(user_id, 'sidd') = ? AND category = ?
+  `).all(cleanUser, cleanCategory) as Array<{ id: string; fact: string; importance: number }>
+
+  const duplicate = existing.find((m) => {
+    if (!m.fact) return false
+    const f1 = m.fact.toLowerCase()
+    const f2 = cleanFact.toLowerCase()
+    return f1 === f2 || (f2.length > 25 && f1.includes(f2)) || (f1.length > 25 && f2.includes(f1))
+  })
+
+  if (duplicate) {
+    const nextImportance = Math.max(duplicate.importance || 3, validImportance)
+    const updateStmt = db.prepare(`
+      UPDATE memories
+      SET importance = ?, updated_at = ?
+      WHERE id = ?
+    `)
+    updateStmt.run(nextImportance, now, duplicate.id)
+    return {
+      id: duplicate.id,
+      user_id: cleanUser,
+      category: cleanCategory,
+      fact: duplicate.fact,
+      importance: nextImportance,
+      tags: cleanTags,
+      source,
+      created_at: now,
+      updated_at: now,
+    }
+  }
+
+  const insertStmt = db.prepare(`
+    INSERT INTO memories (id, user_id, key, value, category, fact, importance, tags, source, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `)
+  insertStmt.run(id, cleanUser, id, cleanFact, cleanCategory, cleanFact, validImportance, cleanTags, source, now, now)
+
+  try {
+    const ftsStmt = db.prepare(`
+      INSERT INTO fts_memories (memory_id, user_id, category, fact, tags)
+      VALUES (?, ?, ?, ?, ?)
+    `)
+    ftsStmt.run(id, cleanUser, cleanCategory, cleanFact, cleanTags)
+  } catch (err) {
+    console.error('Failed to index memory in FTS:', err)
+  }
+
+  return {
+    id,
+    user_id: cleanUser,
+    category: cleanCategory,
+    fact: cleanFact,
+    importance: validImportance,
+    tags: cleanTags,
+    source,
+    created_at: now,
+    updated_at: now,
+  }
+}
+
+export function deleteMemory(id: string): boolean {
+  const db = getDb()
+  try {
+    db.prepare('DELETE FROM fts_memories WHERE memory_id = ?').run(id)
+  } catch {}
+  const res = db.prepare('DELETE FROM memories WHERE id = ?').run(id)
+  return res.changes > 0
+}
+
+export function updateMemory(id: string, updates: Partial<MemoryRecord>): boolean {
+  const db = getDb()
+  const now = new Date().toISOString()
+  const current = db.prepare('SELECT * FROM memories WHERE id = ?').get(id) as MemoryRecord | undefined
+  if (!current) return false
+
+  const updatedFact = updates.fact !== undefined ? updates.fact.trim() : current.fact
+  const updatedCategory = updates.category !== undefined ? (updates.category.toLowerCase() as MemoryCategory) : current.category
+  const updatedImportance = updates.importance !== undefined ? Math.min(5, Math.max(1, updates.importance)) : current.importance
+  const updatedTags = updates.tags !== undefined ? updates.tags : current.tags
+
+  db.prepare(`
+    UPDATE memories
+    SET fact = ?, category = ?, importance = ?, tags = ?, updated_at = ?
+    WHERE id = ?
+  `).run(updatedFact, updatedCategory, updatedImportance, updatedTags, now, id)
+
+  try {
+    db.prepare('DELETE FROM fts_memories WHERE memory_id = ?').run(id)
+    db.prepare(`
+      INSERT INTO fts_memories (memory_id, user_id, category, fact, tags)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(id, current.user_id, updatedCategory, updatedFact, updatedTags)
+  } catch {}
+
+  return true
+}
+
+export function getSmartMemoryContext(query: string, userId: string = 'sidd'): string {
+  const db = getDb()
+  const cleanUser = userId.toLowerCase() === 'jahnavi' ? 'jahnavi' : 'sidd'
+  const userName = cleanUser === 'jahnavi' ? 'Jahnavi' : 'Siddhant'
+
+  // 1. Core anchors (Top priority memories with importance >= 4)
+  const coreStmt = db.prepare(`
+    SELECT * FROM memories
+    WHERE COALESCE(user_id, 'sidd') = ? AND fact IS NOT NULL AND TRIM(fact) != '' AND importance >= 4
+    ORDER BY importance DESC, updated_at DESC
+    LIMIT 4
+  `)
+  const coreMemories = coreStmt.all(cleanUser) as MemoryRecord[]
+
+  // 2. Tokenize query for contextual FTS match
+  const STOPWORDS = new Set([
+    'how', 'many', 'what', 'is', 'are', 'the', 'in', 'of', 'to', 'a', 'an', 'and', 'or', 'for', 'on', 'with',
+    'about', 'my', 'your', 'tell', 'me', 'can', 'you', 'give', 'do', 'does', 'did', 'this', 'that', 'there',
+    'from', 'it', 'its', 'look', 'under', 'check', 'hey', 'jans', 'please', 'know', 'remember'
+  ])
+
+  const words = query
+    .toLowerCase()
+    .replace(/[^\w\s#]/g, ' ')
+    .split(/\s+/)
+    .map((w) => w.replace(/^#/, ''))
+    .filter((w) => w.length > 2 && !STOPWORDS.has(w))
+
+  let matchedMemories: MemoryRecord[] = []
+  if (words.length > 0) {
+    const ftsQuery = words.map((w) => `${w}*`).join(' OR ')
+    try {
+      const ftsStmt = db.prepare(`
+        SELECT m.* FROM fts_memories f
+        JOIN memories m ON m.id = f.memory_id
+        WHERE COALESCE(m.user_id, 'sidd') = ? AND m.fact IS NOT NULL AND fts_memories MATCH ?
+        ORDER BY m.importance DESC, m.updated_at DESC
+        LIMIT 6
+      `)
+      matchedMemories = ftsStmt.all(cleanUser, ftsQuery) as MemoryRecord[]
+    } catch {}
+  }
+
+  // 3. Fallback: recent memories to maintain temporal continuity
+  const recentStmt = db.prepare(`
+    SELECT * FROM memories
+    WHERE COALESCE(user_id, 'sidd') = ? AND fact IS NOT NULL AND TRIM(fact) != ''
+    ORDER BY updated_at DESC
+    LIMIT 4
+  `)
+  const recentMemories = recentStmt.all(cleanUser) as MemoryRecord[]
+
+  // Deduplicate and combine into an authoritative memory context
+  const memoryMap = new Map<string, MemoryRecord>()
+  coreMemories.forEach((m) => memoryMap.set(m.id, m))
+  matchedMemories.forEach((m) => memoryMap.set(m.id, m))
+  recentMemories.forEach((m) => {
+    if (memoryMap.size < 8) memoryMap.set(m.id, m)
+  })
+
+  const memoriesList = Array.from(memoryMap.values())
+  if (memoriesList.length === 0) return ''
+
+  return (
+    `\n\n=== JANS'S LIFELONG MEMORY OF ${userName.toUpperCase()} (Ground Truth Stored Across Sessions) ===\n` +
+    memoriesList
+      .map((m) => `- [${m.category.toUpperCase()} | Priority ${'★'.repeat(m.importance)}] ${m.fact}`)
+      .join('\n') +
+    `\n=== END OF MEMORY BANK ===\n` +
+    `CRITICAL MEMORY DIRECTIVE: You already know these facts deeply about ${userName}. Reflect them naturally in your advice without asking ${userName} to re-explain things already stored in your memory.`
+  )
 }
