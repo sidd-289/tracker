@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { spawn } from 'node:child_process'
 import path from 'node:path'
+import fs from 'node:fs'
 
 export async function POST(request: NextRequest) {
   try {
@@ -12,7 +13,8 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: 'Text is required.' }, { status: 400 })
     }
 
-    const pythonPath = path.resolve(process.cwd(), '.venv/bin/python3')
+    const venvPython = path.resolve(process.cwd(), '.venv/bin/python3')
+    const pythonPath = fs.existsSync(venvPython) ? venvPython : 'python3'
     const scriptPath = path.resolve(process.cwd(), 'src/lib/generate-speech.py')
 
     const child = spawn(pythonPath, [scriptPath, text.slice(0, 1500), voice])
