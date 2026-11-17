@@ -726,3 +726,36 @@ export function deleteTask(id: string, userId: string = 'sidd'): boolean {
   }
   return false
 }
+
+export type DailyQuote = {
+  quote: string
+  author: string
+  date: string
+  source?: string
+}
+
+export function getCachedDailyQuote(today: string): DailyQuote | null {
+  const db = getDb()
+  try {
+    const stmt = db.prepare("SELECT data FROM workspace_state WHERE key = 'daily_quote'")
+    const row = stmt.get() as { data: string } | undefined
+    if (!row) return null
+    const parsed = JSON.parse(row.data) as DailyQuote
+    if (parsed && parsed.date === today && parsed.quote) {
+      return parsed
+    }
+  } catch {}
+  return null
+}
+
+export function saveCachedDailyQuote(quote: DailyQuote) {
+  const db = getDb()
+  try {
+    const stmt = db.prepare(`
+      INSERT INTO workspace_state (key, data, updated_at)
+      VALUES ('daily_quote', ?, datetime('now'))
+      ON CONFLICT(key) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at
+    `)
+    stmt.run(JSON.stringify(quote))
+  } catch {}
+}

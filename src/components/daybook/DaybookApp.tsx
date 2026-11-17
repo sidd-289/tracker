@@ -1100,16 +1100,62 @@ function TodayView({
 }) {
   const [briefOpen, setBriefOpen] = useState(false)
 
-  // Interactive Calendar & Date Navigation State
-  const todayIso = useMemo(() => new Date().toISOString().split('T')[0], [])
+  // Interactive Calendar & Date Navigation State (Using Local Date Utilities to eliminate timezone drift)
+  const toLocalDateIso = (date: Date): string => {
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
+
+  const parseLocalDateIso = (iso: string): Date => {
+    const parts = (iso || '').split('-').map(Number)
+    if (parts.length < 3 || isNaN(parts[0]) || isNaN(parts[1]) || isNaN(parts[2])) {
+      return new Date()
+    }
+    return new Date(parts[0], parts[1] - 1, parts[2], 12, 0, 0)
+  }
+
+  const todayIso = useMemo(() => {
+    const now = new Date()
+    const year = now.getFullYear()
+    const month = String(now.getMonth() + 1).padStart(2, '0')
+    const day = String(now.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }, [])
+
   const [selectedDate, setSelectedDate] = useState(todayIso)
   const [showMonthGrid, setShowMonthGrid] = useState(false)
   const [filterMode, setFilterMode] = useState<'day' | 'all'>('day')
   const [quickTitle, setQuickTitle] = useState('')
   const [quickPriority, setQuickPriority] = useState<'Normal' | 'High'>('Normal')
 
-  const targetDate = useMemo(() => new Date(selectedDate + 'T00:00:00'), [selectedDate])
-  const todayDate = useMemo(() => new Date(todayIso + 'T00:00:00'), [todayIso])
+  // Daily Motivational Quote state
+  const [dailyQuote, setDailyQuote] = useState<{ quote: string; author: string }>({
+    quote: 'Simplicity is prerequisite for reliability.',
+    author: 'Edsger W. Dijkstra',
+  })
+  const [quoteLoading, setQuoteLoading] = useState(false)
+
+  const loadQuote = useCallback((refresh = false) => {
+    setQuoteLoading(true)
+    fetch(`/api/quote${refresh ? '?refresh=true' : ''}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.quote) {
+          setDailyQuote({ quote: data.quote, author: data.author || 'Unknown' })
+        }
+      })
+      .catch(() => {})
+      .finally(() => setQuoteLoading(false))
+  }, [])
+
+  useEffect(() => {
+    loadQuote(false)
+  }, [loadQuote])
+
+  const targetDate = useMemo(() => parseLocalDateIso(selectedDate), [selectedDate])
+  const todayDate = useMemo(() => parseLocalDateIso(todayIso), [todayIso])
 
   const diffDays = Math.round((targetDate.getTime() - todayDate.getTime()) / (1000 * 60 * 60 * 24))
   const isToday = selectedDate === todayIso
@@ -1132,13 +1178,14 @@ function TodayView({
   }, [targetDate])
 
   function navigateDay(offset: number) {
-    const d = new Date(selectedDate + 'T00:00:00')
+    const d = parseLocalDateIso(selectedDate)
     d.setDate(d.getDate() + offset)
-    setSelectedDate(d.toISOString().split('T')[0])
+    setSelectedDate(toLocalDateIso(d))
   }
 
   // 7-day strip centered around selectedDate
   const weekStrip = useMemo(() => {
+    const baseDate = parseLocalDateIso(selectedDate)
     const days: Array<{
       iso: string
       dayName: string
@@ -1148,9 +1195,9 @@ function TodayView({
       count: number
     }> = []
     for (let offset = -3; offset <= 3; offset++) {
-      const d = new Date(targetDate)
+      const d = new Date(baseDate)
       d.setDate(d.getDate() + offset)
-      const iso = d.toISOString().split('T')[0]
+      const iso = toLocalDateIso(d)
       const count = store.tasks.filter((t) => (t.date || todayIso) === iso).length
       days.push({
         iso,
@@ -1162,12 +1209,13 @@ function TodayView({
       })
     }
     return days
-  }, [targetDate, selectedDate, store.tasks, todayIso])
+  }, [selectedDate, store.tasks, todayIso])
 
   // Month grid days (1..daysInMonth)
   const monthDays = useMemo(() => {
-    const year = targetDate.getFullYear()
-    const month = targetDate.getMonth()
+    const baseDate = parseLocalDateIso(selectedDate)
+    const year = baseDate.getFullYear()
+    const month = baseDate.getMonth()
     const daysInMonth = new Date(year, month + 1, 0).getDate()
     const firstDayIndex = (new Date(year, month, 1).getDay() + 6) % 7 // Monday = 0
 
@@ -1180,7 +1228,8 @@ function TodayView({
     }> = []
 
     for (let day = 1; day <= daysInMonth; day++) {
-      const iso = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+      const dayDate = new Date(year, month, day, 12, 0, 0)
+      const iso = toLocalDateIso(dayDate)
       const count = store.tasks.filter((t) => (t.date || todayIso) === iso).length
       days.push({
         iso,
@@ -1190,8 +1239,12 @@ function TodayView({
         isSelected: iso === selectedDate,
       })
     }
-    return { days, firstDayIndex, monthName: targetDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) }
-  }, [targetDate, selectedDate, store.tasks, todayIso])
+    return {
+      days,
+      firstDayIndex,
+      monthName: baseDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
+    }
+  }, [selectedDate, store.tasks, todayIso])
 
   // Filter tasks based on view mode
   const filteredTasks = useMemo(() => {
@@ -1253,19 +1306,41 @@ function TodayView({
       <section className="grid border-2 border-[#20211f] bg-[#dfe5da] shadow-[5px_5px_0_#20211f] lg:grid-cols-[1fr_300px]">
         <div className="flex flex-col justify-between border-b-2 border-[#20211f] p-5 md:p-7 lg:border-b-0 lg:border-r-2">
           <div>
-            <div className="flex items-center gap-2">
-              <span className="h-2 w-2 bg-[#75a38a]" />
-              <span className="font-mono text-[9px] font-black uppercase tracking-[0.18em]">
-                Jans / morning brief
-              </span>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="h-2 w-2 bg-[#75a38a]" />
+                <span className="font-mono text-[9px] font-black uppercase tracking-[0.18em]">
+                  Jans / Daily Spark & Brief
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => loadQuote(true)}
+                disabled={quoteLoading}
+                className="flex items-center gap-1 border-2 border-[#20211f] bg-white px-2 py-0.5 font-mono text-[8px] font-black uppercase transition hover:bg-[#ffca3a] active:translate-x-[1px] active:translate-y-[1px] disabled:opacity-50"
+                title="Get another quote from library"
+              >
+                <span className={quoteLoading ? 'inline-block animate-spin' : ''}>↻</span>
+                <span>{quoteLoading ? 'Fetching...' : 'New Spark'}</span>
+              </button>
             </div>
-            <h2 className="mt-5 max-w-[660px] text-[24px] font-black leading-tight tracking-[-0.035em] md:text-[31px]">
-              You have two important things left. Protect one quiet hour for the OS review, then
-              make tomorrow&apos;s plan small.
-            </h2>
-            <p className="mt-4 max-w-[580px] text-[11px] leading-5 text-[#636a61]">
-              Jans uses your open tasks, habits, and recent notes to keep the plan realistic—not
-              crowded.
+
+            <div className="mt-5">
+              <h2 className="max-w-[660px] font-serif text-[23px] font-normal italic leading-snug tracking-tight text-[#20211f] md:text-[30px]">
+                &ldquo;{dailyQuote.quote}&rdquo;
+              </h2>
+              <div className="mt-2.5 flex items-center gap-2">
+                <span className="h-[2px] w-5 bg-[#e66b3c]" />
+                <p className="font-mono text-[10px] font-black uppercase tracking-[0.16em] text-[#20211f]">
+                  {dailyQuote.author}
+                </p>
+              </div>
+            </div>
+
+            <p className="mt-4 max-w-[580px] font-mono text-[10px] leading-relaxed text-[#636a61]">
+              {filteredTasks.length > 0
+                ? `${filteredTasks.length} task${filteredTasks.length > 1 ? 's' : ''} on deck for ${formattedSelectedDate} (${dayCompleted} done). Protect a quiet focus block, review notes, and keep your plan sharp.`
+                : `No tasks scheduled for ${formattedSelectedDate}. Use this space for deep study, review past notes, or schedule your next target below.`}
             </p>
           </div>
           <div className="mt-7 flex flex-wrap gap-2">
