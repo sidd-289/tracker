@@ -2,20 +2,23 @@
 """
 Jans CLI - Headless Terminal Interface for Jans AI
 Direct socket streaming from your AMD Ryzen Linux companion (fedora:11434)
-Zero browser footprint. Supports standard Unix pipes and interactive REPL.
+Zero browser footprint. Supports standard Unix pipes, lifelong memory recall, and interactive REPL.
 """
 
 import sys
 import os
 import json
+import sqlite3
+import time
 from urllib.request import Request, urlopen
 from urllib.error import URLError
 
 DEFAULT_HOSTS = [
     os.getenv("JANS_URL"),
+    "http://localhost:11434",
+    "http://127.0.0.1:11434",
     "http://fedora:11434",
     "http://fedora.local:11434",
-    "http://localhost:11434",
 ]
 FALLBACK_HOSTS = [h for h in DEFAULT_HOSTS if h]
 MODEL_NAME = os.getenv("JANS_MODEL", "jans:latest")
@@ -24,12 +27,90 @@ SYSTEM_PROMPT = """You are Jans, Siddhant's personal AI engineering companion, s
 Help Siddhant plan, research, organize information, master systems architecture, and keep commitments realistic.
 Be concise, practical, calm, and high-signal. Address him as Siddhant."""
 
-def find_document_context(query):
-    db_path = "/Users/sidd/Documents/jans-track/tracker/data/jans.db"
-    if not os.path.exists(db_path):
+def get_db_path():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.getenv("JANS_DB_PATH"),
+        os.path.abspath(os.path.join(script_dir, "..", "data", "jans.db")),
+        "/Users/sidd/Documents/jans-track/tracker/data/jans.db",
+        os.path.expanduser("~/jans-track/tracker/data/jans.db"),
+    ]
+    for c in candidates:
+        if c and os.path.exists(c):
+            return c
+    return None
+
+def find_memory_context(query, user_id="sidd"):
+    db_path = get_db_path()
+    if not db_path:
         return ""
     try:
-        import sqlite3
+        con = sqlite3.connect(db_path)
+        cur = con.cursor()
+
+        # 1. Core anchors (Top priority memories with importance >= 4)
+        core = cur.execute(
+            "SELECT category, fact, importance FROM memories WHERE COALESCE(user_id, 'sidd') = ? AND fact IS NOT NULL AND importance >= 4 ORDER BY importance DESC, updated_at DESC LIMIT 4",
+            (user_id,)
+        ).fetchall()
+
+        # 2. Tokenize query for contextual FTS match
+        STOPWORDS = set([
+            "how", "many", "what", "is", "are", "the", "in", "of", "to", "a", "an", "and", "or",
+            "for", "on", "with", "about", "my", "your", "tell", "me", "can", "you", "give", "do",
+            "does", "did", "this", "that", "there", "from", "it", "its", "look", "under", "check", "jans"
+        ])
+        words = [
+            w for w in "".join(c if c.isalnum() or c.isspace() else " " for c in query.lower()).split()
+            if len(w) > 2 and w not in STOPWORDS
+        ]
+
+        matched = []
+        if words:
+            fts_q = " OR ".join(f"{w}*" for w in words)
+            try:
+                matched = cur.execute(
+                    "SELECT m.category, m.fact, m.importance FROM fts_memories f JOIN memories m ON m.id = f.memory_id WHERE COALESCE(m.user_id, 'sidd') = ? AND fts_memories MATCH ? ORDER BY m.importance DESC LIMIT 5",
+                    (user_id, fts_q)
+                ).fetchall()
+            except Exception:
+                pass
+
+        # 3. Fallback recent memories
+        recent = cur.execute(
+            "SELECT category, fact, importance FROM memories WHERE COALESCE(user_id, 'sidd') = ? AND fact IS NOT NULL ORDER BY updated_at DESC LIMIT 3",
+            (user_id,)
+        ).fetchall()
+
+        con.close()
+
+        combined = []
+        seen = set()
+        for r in (core + matched + recent):
+            if r[1] not in seen:
+                seen.add(r[1])
+                combined.append(r)
+                if len(combined) >= 6:
+                    break
+
+        if not combined:
+            return ""
+
+        mem_lines = [f"- [{r[0].upper()} | {'★' * r[2]}] {r[1]}" for r in combined]
+        return (
+            "\n\n=== JANS'S LIFELONG MEMORY OF SIDDHANT (Ground Truth Stored Across Sessions) ===\n" +
+            "\n".join(mem_lines) +
+            "\n=== END OF MEMORY BANK ===\n" +
+            "CRITICAL DIRECTIVE: You already know these facts deeply about Siddhant. Reflect them naturally in your advice without asking him to re-explain."
+        )
+    except Exception:
+        return ""
+
+def find_document_context(query):
+    db_path = get_db_path()
+    if not db_path:
+        return ""
+    try:
         con = sqlite3.connect(db_path)
         cur = con.cursor()
 
@@ -82,20 +163,65 @@ def find_document_context(query):
             return ""
         excerpts = [f'[Source: "{r[0]}" | Tag: #{r[1] or "General"}]:\n{r[2]}' for r in rows]
         return (
-            "\n\n=== SIDDHANT\'S INDEXED DOCUMENTS & PDF CONTENT (Authoritative Ground Truth) ===\n" +
+            "\n\n=== SIDDHANT'S INDEXED DOCUMENTS & PDF CONTENT (Authoritative Ground Truth) ===\n" +
             library_dir + "\n\nExcerpts:\n" +
             "\n---\n".join(excerpts) +
             "\n=== END OF DOCUMENT CONTEXT ===\n" +
-            "CRITICAL INSTRUCTION: Answer Siddhant\'s question strictly using the document content above. If Siddhant asks for a tag (e.g. #Physics), reference the documents under that tag. Cite exact numbers, questions, and topics from the document without guessing or hallucinating."
+            "CRITICAL INSTRUCTION: Answer Siddhant's question strictly using the document content above. If Siddhant asks for a tag (e.g. #Physics), reference the documents under that tag. Cite exact numbers, questions, and topics from the document without guessing or hallucinating."
         )
     except Exception:
         return ""
+
+def print_memories(user_id="sidd"):
+    db_path = get_db_path()
+    if not db_path:
+        print("Database not found.")
+        return
+    con = sqlite3.connect(db_path)
+    rows = con.execute(
+        "SELECT id, category, fact, importance, updated_at FROM memories WHERE COALESCE(user_id, 'sidd') = ? ORDER BY importance DESC, updated_at DESC",
+        (user_id,)
+    ).fetchall()
+    con.close()
+    if not rows:
+        print("\x1b[33mNo memories stored yet.\x1b[0m")
+        return
+    print(f"\n\x1b[1m🧠 Jans Lifelong Memory Bank ({len(rows)} memories stored in SQLite)\x1b[0m\n")
+    for r in rows:
+        stars = "\x1b[33m" + "★" * (r[3] or 3) + "\x1b[0m"
+        cat = f"\x1b[36m[{r[1].upper()}]\x1b[0m"
+        print(f" {stars:14} {cat:15} {r[2]}")
+    print()
+
+def record_memory(fact, category="general", importance=4, user_id="sidd"):
+    db_path = get_db_path()
+    if not db_path:
+        print("Database not found.")
+        return
+    con = sqlite3.connect(db_path)
+    cur = con.cursor()
+    mem_id = f"mem_{int(time.time()*1000)}"
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    cur.execute(
+        "INSERT INTO memories (id, user_id, key, value, category, fact, importance, tags, source, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (mem_id, user_id, mem_id, fact, category, fact, importance, "cli,manual", "manual", now, now)
+    )
+    try:
+        cur.execute(
+            "INSERT INTO fts_memories (memory_id, user_id, category, fact, tags) VALUES (?, ?, ?, ?, ?)",
+            (mem_id, user_id, category, fact, "cli,manual")
+        )
+    except Exception:
+        pass
+    con.commit()
+    con.close()
+    print(f"\x1b[32m✔ Remembered in SQLite:\x1b[0m {fact} ({'★' * importance})")
 
 def find_active_host():
     for host in FALLBACK_HOSTS:
         try:
             req = Request(f"{host}/api/tags", headers={"User-Agent": "JansCLI/1.0"})
-            with urlopen(req, timeout=2.0) as res:
+            with urlopen(req, timeout=1.5) as res:
                 if res.status == 200:
                     return host
         except Exception:
@@ -116,7 +242,7 @@ def stream_chat(host, messages):
         data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json"}
     )
-    
+
     full_response = []
     try:
         with urlopen(req, timeout=60.0) as response:
@@ -142,16 +268,52 @@ def stream_chat(host, messages):
         sys.stdout.write("\n[Interrupted]\n")
         return "".join(full_response)
 
+def print_help():
+    print("""\x1b[1mJans Terminal Interface (CLI)\x1b[0m
+Direct socket connection to Jans AI with Lifelong SQLite Memory & PDF RAG.
+
+\x1b[1mUsage:\x1b[0m
+  jans                          Start interactive conversational REPL
+  jans "<query>"                Ask a single question and stream response
+  cat <file> | jans "<task>"    Pipe file contents or logs directly into Jans
+  jans --brain, -b              View all memories stored in Jans's SQLite brain
+  jans --remember "<fact>"      Manually teach Jans a permanent fact
+  jans --help, -h               Show this help message
+
+\x1b[1mEnvironment Variables:\x1b[0m
+  JANS_URL                      Override Ollama host (default: autodetect fedora/localhost)
+  JANS_MODEL                    Override model name (default: jans:latest)
+  JANS_DB_PATH                  Path to jans.db SQLite file
+""")
+
 def main():
+    if "--help" in sys.argv or "-h" in sys.argv:
+        print_help()
+        return
+
+    if "--brain" in sys.argv or "-b" in sys.argv:
+        print_memories()
+        return
+
+    if "--remember" in sys.argv:
+        idx = sys.argv.index("--remember")
+        if idx + 1 < len(sys.argv):
+            fact = " ".join(sys.argv[idx + 1:])
+            record_memory(fact, category="goal", importance=5)
+            return
+        else:
+            print("Usage: jans --remember '<fact to remember>'")
+            return
+
     host = find_active_host()
     if not host:
         sys.stderr.write(
             "\x1b[31;1mError:\x1b[0m Jans host is unreachable.\n"
-            "Ensure your AMD Linux machine ('fedora') is awake and connected via Wi-Fi or Tailscale.\n"
+            "Ensure your AMD Linux machine ('fedora') is awake and Ollama is running (`systemctl start ollama` or `ollama serve`).\n"
+            f"Tried hosts: {', '.join(FALLBACK_HOSTS)}\n"
         )
         sys.exit(1)
 
-    # Check if input is piped through stdin (e.g. cat file.log | jans "summarize")
     piped_data = ""
     if not sys.stdin.isatty():
         try:
@@ -172,8 +334,9 @@ def main():
             prompt_content = user_text
 
         doc_context = find_document_context(prompt_content)
+        mem_context = find_memory_context(prompt_content)
         messages = [
-            {"role": "system", "content": SYSTEM_PROMPT + doc_context},
+            {"role": "system", "content": SYSTEM_PROMPT + mem_context + doc_context},
             {"role": "user", "content": prompt_content}
         ]
         stream_chat(host, messages)
@@ -181,7 +344,7 @@ def main():
 
     # 2. Interactive REPL Mode
     print(f"\x1b[1mJans Terminal Console\x1b[0m · Connected to \x1b[32m{host}\x1b[0m ({MODEL_NAME})")
-    print("Type your message, or 'exit' / Ctrl+C to quit.\n")
+    print("Type your message, or 'exit' / Ctrl+C to quit. (Tip: jans --brain to inspect memory)\n")
 
     history = [{"role": "system", "content": SYSTEM_PROMPT}]
 
@@ -193,11 +356,15 @@ def main():
             if user_input.lower() in ("exit", "quit", "q"):
                 print("Logging off.")
                 break
+            if user_input.lower() in ("brain", "--brain", "-b"):
+                print_memories()
+                continue
 
             doc_context = find_document_context(user_input)
+            mem_context = find_memory_context(user_input)
             history.append({"role": "user", "content": user_input})
             active_messages = [
-                {"role": "system", "content": SYSTEM_PROMPT + doc_context},
+                {"role": "system", "content": SYSTEM_PROMPT + mem_context + doc_context},
                 *history[1:][-8:]
             ]
             reply = stream_chat(host, active_messages)
