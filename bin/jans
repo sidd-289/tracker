@@ -2,7 +2,7 @@
 """
 Jans CLI - Headless Terminal Interface for Jans AI
 Direct socket streaming from your AMD Ryzen Linux companion (fedora:11434)
-Zero browser footprint. Supports standard Unix pipes, lifelong memory recall, and interactive REPL.
+Zero browser footprint. Supports standard Unix pipes, real-time clock, lifelong memory recall, and interactive REPL.
 """
 
 import sys
@@ -10,6 +10,7 @@ import os
 import json
 import sqlite3
 import time
+import re
 from urllib.request import Request, urlopen
 from urllib.error import URLError
 
@@ -25,13 +26,15 @@ MODEL_NAME = os.getenv("JANS_MODEL", "jans:latest")
 
 SYSTEM_PROMPT = """You are Jans, Siddhant's personal AI engineering companion, study partner, and accountability wingman running natively on his AMD Ryzen Linux machine (fedora).
 Help Siddhant plan, research, organize information, master systems architecture, and keep commitments realistic.
-Be concise, practical, calm, and high-signal. Address him as Siddhant."""
+Be concise, practical, calm, and high-signal. Address him as Siddhant.
+When planning or discussing schedules, always calculate exact remaining days/hours relative to the real-time date provided."""
 
 def get_db_path():
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
     candidates = [
         os.getenv("JANS_DB_PATH"),
         os.path.abspath(os.path.join(script_dir, "..", "data", "jans.db")),
+        os.path.abspath(os.path.join(script_dir, "data", "jans.db")),
         "/Users/sidd/Documents/jans-track/tracker/data/jans.db",
         os.path.expanduser("~/jans-track/tracker/data/jans.db"),
     ]
@@ -39,6 +42,22 @@ def get_db_path():
         if c and os.path.exists(c):
             return c
     return None
+
+def get_temporal_context():
+    from datetime import datetime
+    now = datetime.now().astimezone()
+    date_str = now.strftime("%A, %B %d, %Y")
+    time_str = now.strftime("%I:%M %p %Z")
+    iso_date = now.strftime("%Y-%m-%d")
+    return (
+        f"\n\n=== REAL-TIME TEMPORAL CONTEXT (Ground Truth System Clock) ===\n"
+        f"- Current Timestamp: {date_str} at {time_str}\n"
+        f"- Today's Date: {date_str} ({iso_date})\n"
+        f"CRITICAL DIRECTIVE ON DATES & TIMELINES:\n"
+        f"Use the real-time date above to calculate exact days, deadlines, and countdowns. "
+        f"Always reason chronologically relative to today's date when planning study schedules or milestones.\n"
+        f"=== END OF TEMPORAL CONTEXT ==="
+    )
 
 def find_memory_context(query, user_id="sidd"):
     db_path = get_db_path()
@@ -58,7 +77,7 @@ def find_memory_context(query, user_id="sidd"):
         STOPWORDS = set([
             "how", "many", "what", "is", "are", "the", "in", "of", "to", "a", "an", "and", "or",
             "for", "on", "with", "about", "my", "your", "tell", "me", "can", "you", "give", "do",
-            "does", "did", "this", "that", "there", "from", "it", "its", "look", "under", "check", "jans"
+            "does", "did", "this", "that", "there", "from", "it", "its", "look", "under", "check", "jans", "exam"
         ])
         words = [
             w for w in "".join(c if c.isalnum() or c.isspace() else " " for c in query.lower()).split()
@@ -96,7 +115,7 @@ def find_memory_context(query, user_id="sidd"):
         if not combined:
             return ""
 
-        mem_lines = [f"- [{r[0].upper()} | {'★' * r[2]}] {r[1]}" for r in combined]
+        mem_lines = [f"- [{r[0].upper()} | {'★' * (r[2] or 3)}] {r[1]}" for r in combined]
         return (
             "\n\n=== JANS'S LIFELONG MEMORY OF SIDDHANT (Ground Truth Stored Across Sessions) ===\n" +
             "\n".join(mem_lines) +
@@ -151,7 +170,8 @@ def find_document_context(query):
             k in lower_q for k in ("pdf", "assignment", "document", "upload", "question", "qpa", "paper", "tag", "label")
         ) or any(d[1] and d[1].lower() in lower_q for d in all_docs)
 
-        if not rows or is_doc_ref:
+        # ONLY pull fallback chunks if the user explicitly referenced documents/assignments/tags
+        if not rows and is_doc_ref:
             fallback = cur.execute(
                 "SELECT d.original_name, d.label, c.content FROM documents d JOIN document_chunks c ON d.id = c.document_id ORDER BY d.created_at DESC, c.chunk_index ASC LIMIT 8"
             ).fetchall()
@@ -159,15 +179,19 @@ def find_document_context(query):
                 rows = fallback
 
         con.close()
+        # If no chunks matched and user did not ask about documents, do NOT inject unrelated documents!
         if not rows:
+            if is_doc_ref and library_dir:
+                return f"\n\n=== SIDDHANT'S INDEXED DOCUMENTS (Directory) ===\n{library_dir}\n=== END DIRECTORY ===\n"
             return ""
+
         excerpts = [f'[Source: "{r[0]}" | Tag: #{r[1] or "General"}]:\n{r[2]}' for r in rows]
         return (
-            "\n\n=== SIDDHANT'S INDEXED DOCUMENTS & PDF CONTENT (Authoritative Ground Truth) ===\n" +
+            "\n\n=== SIDDHANT'S INDEXED DOCUMENTS & RELEVANT EXCERPTS ===\n" +
             library_dir + "\n\nExcerpts:\n" +
             "\n---\n".join(excerpts) +
             "\n=== END OF DOCUMENT CONTEXT ===\n" +
-            "CRITICAL INSTRUCTION: Answer Siddhant's question strictly using the document content above. If Siddhant asks for a tag (e.g. #Physics), reference the documents under that tag. Cite exact numbers, questions, and topics from the document without guessing or hallucinating."
+            "CRITICAL INSTRUCTION ON DOCUMENTS: If the document excerpts above are directly relevant to Siddhant's current question, cite them. If his question is about an entirely different topic (e.g. asking about Web Development or DSA when the documents are about Physics), DO NOT force connections to these documents. Answer his question directly using your core engineering knowledge."
         )
     except Exception:
         return ""
@@ -193,29 +217,63 @@ def print_memories(user_id="sidd"):
         print(f" {stars:14} {cat:15} {r[2]}")
     print()
 
-def record_memory(fact, category="general", importance=4, user_id="sidd"):
+def record_memory(fact, category="general", importance=4, user_id="sidd", quiet=False):
     db_path = get_db_path()
     if not db_path:
-        print("Database not found.")
         return
-    con = sqlite3.connect(db_path)
-    cur = con.cursor()
-    mem_id = f"mem_{int(time.time()*1000)}"
-    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    cur.execute(
-        "INSERT INTO memories (id, user_id, key, value, category, fact, importance, tags, source, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (mem_id, user_id, mem_id, fact, category, fact, importance, "cli,manual", "manual", now, now)
-    )
     try:
-        cur.execute(
-            "INSERT INTO fts_memories (memory_id, user_id, category, fact, tags) VALUES (?, ?, ?, ?, ?)",
-            (mem_id, user_id, category, fact, "cli,manual")
-        )
+        con = sqlite3.connect(db_path)
+        cur = con.cursor()
+        mem_id = f"mem_{int(time.time()*1000)}"
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        clean_fact = fact.strip()
+        
+        # Check existing for duplicate
+        existing = cur.execute(
+            "SELECT id, importance FROM memories WHERE COALESCE(user_id, 'sidd') = ? AND fact = ?",
+            (user_id, clean_fact)
+        ).fetchone()
+
+        if existing:
+            cur.execute(
+                "UPDATE memories SET importance = MAX(importance, ?), updated_at = ? WHERE id = ?",
+                (importance, now, existing[0])
+            )
+        else:
+            cur.execute(
+                "INSERT INTO memories (id, user_id, key, value, category, fact, importance, tags, source, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (mem_id, user_id, mem_id, clean_fact, category, clean_fact, importance, "cli,auto", "auto", now, now)
+            )
+            try:
+                cur.execute(
+                    "INSERT INTO fts_memories (memory_id, user_id, category, fact, tags) VALUES (?, ?, ?, ?, ?)",
+                    (mem_id, user_id, category, clean_fact, "cli,auto")
+                )
+            except Exception:
+                pass
+
+        con.commit()
+        con.close()
+        if not quiet:
+            print(f"\x1b[32m✔ Remembered in SQLite:\x1b[0m {clean_fact} ({'★' * importance})")
     except Exception:
         pass
-    con.commit()
-    con.close()
-    print(f"\x1b[32m✔ Remembered in SQLite:\x1b[0m {fact} ({'★' * importance})")
+
+def auto_extract_memories(user_text, user_id="sidd"):
+    text = user_text.strip()
+    cleaned = re.sub(r'^(?:hi|hello|hey|yo|ok|okay)?\s*(?:jans)?\s*[,:]?\s*', '', text, flags=re.IGNORECASE).strip()
+    patterns = [
+        r'(?:my\s+)?([a-zA-Z\s]{2,25}?)\s+exam\s+(?:is\s+)?on\s+([0-9a-zA-Z\s,]+?)(?:\s+and\s+|\.|\n|$)',
+        r'(?:my\s+)?([a-zA-Z\s]{2,25}?)\s+deadline\s+(?:is\s+)?on\s+([0-9a-zA-Z\s,]+?)(?:\s+and\s+|\.|\n|$)',
+    ]
+    for pattern in patterns:
+        matches = re.findall(pattern, cleaned, re.IGNORECASE)
+        for subject, date_val in matches:
+            subj = subject.strip().title()
+            d_val = date_val.strip()
+            if len(subj) > 1 and len(d_val) > 1:
+                fact = f"{subj} Exam scheduled for {d_val}"
+                record_memory(fact, category="study", importance=5, user_id=user_id, quiet=True)
 
 def find_active_host():
     for host in FALLBACK_HOSTS:
@@ -270,7 +328,7 @@ def stream_chat(host, messages):
 
 def print_help():
     print("""\x1b[1mJans Terminal Interface (CLI)\x1b[0m
-Direct socket connection to Jans AI with Lifelong SQLite Memory & PDF RAG.
+Direct socket connection to Jans AI with Real-Time Clock, Lifelong SQLite Memory & PDF RAG.
 
 \x1b[1mUsage:\x1b[0m
   jans                          Start interactive conversational REPL
@@ -299,7 +357,7 @@ def main():
         idx = sys.argv.index("--remember")
         if idx + 1 < len(sys.argv):
             fact = " ".join(sys.argv[idx + 1:])
-            record_memory(fact, category="goal", importance=5)
+            record_memory(fact, category="goal", importance=5, quiet=False)
             return
         else:
             print("Usage: jans --remember '<fact to remember>'")
@@ -333,10 +391,12 @@ def main():
         else:
             prompt_content = user_text
 
+        auto_extract_memories(prompt_content)
         doc_context = find_document_context(prompt_content)
         mem_context = find_memory_context(prompt_content)
+        temporal_context = get_temporal_context()
         messages = [
-            {"role": "system", "content": SYSTEM_PROMPT + mem_context + doc_context},
+            {"role": "system", "content": SYSTEM_PROMPT + temporal_context + mem_context + doc_context},
             {"role": "user", "content": prompt_content}
         ]
         stream_chat(host, messages)
@@ -360,11 +420,13 @@ def main():
                 print_memories()
                 continue
 
+            auto_extract_memories(user_input)
             doc_context = find_document_context(user_input)
             mem_context = find_memory_context(user_input)
+            temporal_context = get_temporal_context()
             history.append({"role": "user", "content": user_input})
             active_messages = [
-                {"role": "system", "content": SYSTEM_PROMPT + mem_context + doc_context},
+                {"role": "system", "content": SYSTEM_PROMPT + temporal_context + mem_context + doc_context},
                 *history[1:][-8:]
             ]
             reply = stream_chat(host, active_messages)

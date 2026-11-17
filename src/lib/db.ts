@@ -319,7 +319,7 @@ export function getSmartDocumentContext(query: string, userId: string = 'sidd'):
     } catch {}
   }
 
-  // 2. Fallback: if query mentions document/pdf/assignment or a document tag, pull relevant chunks
+  // 2. Fallback: ONLY if query specifically references documents, PDFs, or a known document tag
   const lowerQ = query.toLowerCase()
   const isDocReference =
     lowerQ.includes('pdf') ||
@@ -334,7 +334,7 @@ export function getSmartDocumentContext(query: string, userId: string = 'sidd'):
     lowerQ.includes('label') ||
     allDocs.some((d) => d.label && lowerQ.includes(d.label.toLowerCase()))
 
-  if (matchedChunks.length === 0 || isDocReference) {
+  if (matchedChunks.length === 0 && isDocReference) {
     const fallbackStmt = db.prepare(`
       SELECT d.original_name as title, d.label, c.content
       FROM documents d
@@ -353,17 +353,23 @@ export function getSmartDocumentContext(query: string, userId: string = 'sidd'):
     }
   }
 
-  if (matchedChunks.length === 0 && !libraryDirectory) return ''
+  // If no chunks matched and the user did not explicitly ask for documents, do NOT inject unrelated documents!
+  if (matchedChunks.length === 0) {
+    if (isDocReference && libraryDirectory) {
+      return `\n\n=== ${userName.toUpperCase()}'S INDEXED DOCUMENTS (Directory) ===\n${libraryDirectory}\n=== END DIRECTORY ===\n`
+    }
+    return ''
+  }
 
   return (
-    `\n\n=== ${userName.toUpperCase()}'S INDEXED DOCUMENTS & PDF CONTENT (Authoritative Ground Truth) ===\n` +
+    `\n\n=== ${userName.toUpperCase()}'S INDEXED DOCUMENTS & RELEVANT EXCERPTS ===\n` +
     libraryDirectory +
     `\nExcerpts:\n` +
     matchedChunks
       .map((c) => `[Source: "${c.title}" | Tag: #${c.label || 'General'}]\n${c.content}`)
       .join('\n---\n') +
     `\n=== END OF DOCUMENT CONTEXT ===\n` +
-    `CRITICAL INSTRUCTION: Answer ${userName}'s question strictly using the document content above. If ${userName} asks for a tag (e.g. #Physics or #Notes), reference the documents under that tag. Cite exact numbers, questions, and topics from the document without guessing or hallucinating.`
+    `CRITICAL INSTRUCTION ON DOCUMENTS: If the document excerpts above are directly relevant to ${userName}'s current question, cite them. If ${userName}'s question is about a different subject (e.g. asking about Web Development or DSA when the documents are about Physics), DO NOT force connections to these documents. Answer his question directly using your engineering knowledge.`
   )
 }
 
