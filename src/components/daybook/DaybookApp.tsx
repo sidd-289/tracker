@@ -923,6 +923,7 @@ export function DaybookApp() {
                 dateLabel={dateLabel}
                 jansLevel={jansLevel}
                 completedTasks={completedTasks}
+                currentUser={currentUser}
                 onCapture={setCapture}
                 onNavigate={setActive}
               />
@@ -1087,6 +1088,7 @@ function TodayView({
   dateLabel,
   jansLevel,
   completedTasks,
+  currentUser = 'sidd',
   onCapture,
   onNavigate,
 }: {
@@ -1095,10 +1097,12 @@ function TodayView({
   dateLabel: string
   jansLevel: number
   completedTasks: number
+  currentUser?: 'sidd' | 'jahnavi'
   onCapture: (type: CaptureType) => void
   onNavigate: (section: Section) => void
 }) {
   const [briefOpen, setBriefOpen] = useState(false)
+  const [showTimetableModal, setShowTimetableModal] = useState(false)
 
   // Interactive Calendar & Date Navigation State (Using Local Date Utilities to eliminate timezone drift)
   const toLocalDateIso = (date: Date): string => {
@@ -1439,6 +1443,14 @@ function TodayView({
                 >
                   {showMonthGrid ? '✕ Close Calendar' : '📅 Month Grid'}
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setShowTimetableModal(true)}
+                  className="border border-[#20211f] bg-white px-2 py-1 font-mono text-[8px] font-black uppercase text-[#20211f] transition hover:bg-[#ffca3a]"
+                  title="Sync College Timetable from hub.msot.org"
+                >
+                  🎓 College Timetable
+                </button>
               </div>
             </div>
 
@@ -1742,6 +1754,30 @@ function TodayView({
           />
         </div>
       </section>
+
+      {showTimetableModal && (
+        <TimetableModal
+          user={currentUser || 'sidd'}
+          onClose={() => setShowTimetableModal(false)}
+          onSyncComplete={() => {
+            fetch(`/api/sync?user=${currentUser || 'sidd'}`)
+              .then((res) => (res.ok ? res.json() : null))
+              .then((data) => {
+                if (data?.state) {
+                  setStore((current) => ({
+                    ...current,
+                    ...data.state,
+                    profiles: normalizeProfiles({
+                      ...current.profiles,
+                      ...(data.state.profiles || {}),
+                    }),
+                  }))
+                }
+              })
+              .catch(() => {})
+          }}
+        />
+      )}
     </>
   )
 }
@@ -4418,5 +4454,133 @@ function LibraryView({
         </div>
       </section>
     </>
+  )
+}
+
+function TimetableModal({
+  user,
+  onClose,
+  onSyncComplete,
+}: {
+  user: string
+  onClose: () => void
+  onSyncComplete: () => void
+}) {
+  const [token, setToken] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [status, setStatus] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleSync() {
+    setLoading(true)
+    setError(null)
+    setStatus('Connecting to hub.msot.org...')
+    try {
+      const res = await fetch('/api/timetable/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: token.trim(), user }),
+      })
+      const data = await res.json()
+      if (!res.ok || data.error) {
+        throw new Error(data.error || 'Failed to sync timetable')
+      }
+      setStatus(`✔ Successfully synchronized ${data.addedCount} classes!`)
+      onSyncComplete()
+      setTimeout(() => {
+        onClose()
+      }, 1400)
+    } catch (err: any) {
+      setError(err?.message || 'Sync failed')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#20211f]/70 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-lg border-2 border-[#20211f] bg-[#f3efe3] p-6 shadow-[8px_8px_0_#20211f]">
+        <div className="flex items-center justify-between border-b-2 border-[#20211f] pb-3">
+          <div className="flex items-center gap-2">
+            <span className="h-3 w-3 bg-[#e66b3c]" />
+            <h2 className="font-mono text-sm font-black uppercase tracking-wider text-[#20211f]">
+              Sync College Timetable (hub.msot.org)
+            </h2>
+          </div>
+          <button
+            onClick={onClose}
+            className="grid h-6 w-6 place-items-center border border-[#20211f] bg-white font-mono text-xs font-black hover:bg-[#ffca3a]"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="mt-4 space-y-3">
+          <p className="text-xs text-[#555a53]">
+            Link your live classes, labs, and lecture schedules from <strong>hub.msot.org/#/timetable</strong> directly into your Daybook calendar.
+          </p>
+
+          <div className="border border-[#20211f] bg-white p-3 font-mono text-[10px]">
+            <p className="font-bold text-[#20211f]">How to grab your authToken (1-time):</p>
+            <ol className="mt-1 list-decimal space-y-1 pl-4 text-[#666]">
+              <li>Log in to <span className="font-bold text-[#20211f]">hub.msot.org/#/timetable</span></li>
+              <li>Press <kbd className="border bg-[#f3efe3] px-1 font-bold">Cmd + Option + I</kbd> and click <strong>Console</strong></li>
+              <li>Paste this command and hit Enter:</li>
+            </ol>
+            <div className="mt-1.5 flex items-center justify-between border border-[#20211f] bg-[#dfe5da] p-1.5 text-[9px]">
+              <code>copy(localStorage.getItem(&apos;flutter.authToken&apos;) || localStorage.getItem(&apos;authToken&apos;))</code>
+            </div>
+          </div>
+
+          <div>
+            <label className="block font-mono text-[9px] font-black uppercase tracking-wider text-[#20211f]">
+              Student Auth Token:
+            </label>
+            <input
+              type="text"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              placeholder="Paste token here (or leave empty if already saved in CLI)..."
+              className="mt-1 w-full border-2 border-[#20211f] bg-white p-2 font-mono text-xs focus:bg-[#fff9dd] focus:outline-none"
+            />
+          </div>
+
+          {error && (
+            <div className="border border-red-500 bg-red-100 p-2 font-mono text-[10px] text-red-700">
+              {error}
+            </div>
+          )}
+
+          {status && (
+            <div className="border border-green-600 bg-green-100 p-2 font-mono text-[10px] text-green-800">
+              {status}
+            </div>
+          )}
+
+          <div className="mt-2 flex items-center justify-between border-t border-[#20211f] pt-3">
+            <span className="font-mono text-[9px] text-[#777]">
+              Terminal shortcut: <code className="font-bold text-[#20211f]">jans timetable sync</code>
+            </span>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="border-2 border-[#20211f] bg-white px-3 py-1.5 font-mono text-[9px] font-bold uppercase hover:bg-[#dfe5da]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={handleSync}
+                className="border-2 border-[#20211f] bg-[#20211f] px-4 py-1.5 font-mono text-[9px] font-bold uppercase text-[#f3efe3] hover:bg-[#e66b3c] disabled:opacity-50"
+              >
+                {loading ? 'Syncing...' : 'Sync Now'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }

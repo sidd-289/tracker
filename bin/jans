@@ -12,7 +12,7 @@ import sqlite3
 import time
 import re
 from urllib.request import Request, urlopen
-from urllib.error import URLError
+from urllib.error import URLError, HTTPError
 
 DEFAULT_HOSTS = [
     os.getenv("JANS_URL"),
@@ -413,6 +413,300 @@ def auto_extract_tasks(user_text, user_id="sidd"):
         if t_title and not t_title.lower().startswith('give'):
             add_workspace_task(t_title.strip(), t_date.strip() if t_date else None, priority="Normal", user_id=user_id, quiet=False)
 
+def get_or_prompt_msot_token(cli_token=None):
+    if cli_token:
+        save_msot_token(cli_token)
+        return cli_token
+
+    token = os.environ.get("MSOT_AUTH_TOKEN")
+    if token:
+        return token.strip()
+
+    db_path = get_db_path()
+    if db_path:
+        try:
+            con = sqlite3.connect(db_path)
+            row = con.execute("SELECT data FROM workspace_state WHERE key = 'msot_auth_token'").fetchone()
+            con.close()
+            if row and row[0]:
+                return row[0].strip()
+        except Exception:
+            pass
+
+    env_paths = [
+        os.path.join(os.getcwd(), ".env.local"),
+        os.path.join(os.getcwd(), "tracker", ".env.local"),
+        os.path.expanduser("~/Documents/jans-track/tracker/.env.local"),
+    ]
+    for ep in env_paths:
+        if os.path.exists(ep):
+            try:
+                with open(ep, "r") as f:
+                    for line in f:
+                        if line.strip().startswith("MSOT_AUTH_TOKEN="):
+                            t = line.split("=", 1)[1].strip().strip('"').strip("'")
+                            if t:
+                                return t
+            except Exception:
+                pass
+
+    return None
+
+def save_msot_token(token):
+    clean = token.strip()
+    db_path = get_db_path()
+    if db_path:
+        try:
+            con = sqlite3.connect(db_path)
+            now_iso = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+            con.execute(
+                "INSERT INTO workspace_state (key, data, updated_at) VALUES ('msot_auth_token', ?, ?) ON CONFLICT(key) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at",
+                (clean, now_iso)
+            )
+            con.commit()
+            con.close()
+        except Exception:
+            pass
+
+    env_path = os.path.expanduser("~/Documents/jans-track/tracker/.env.local")
+    try:
+        lines = []
+        if os.path.exists(env_path):
+            with open(env_path, "r") as f:
+                lines = [l for l in f.readlines() if not l.startswith("MSOT_AUTH_TOKEN=")]
+        lines.append(f'MSOT_AUTH_TOKEN="{clean}"\n')
+        with open(env_path, "w") as f:
+            f.writelines(lines)
+    except Exception:
+        pass
+
+def fetch_msot_timetable(token, start_date=None, days=14):
+    if not start_date:
+        start_date = time.strftime("%Y-%m-%d")
+
+    url = f"https://api.msot.org/hub/box/student/timetable/events?date={start_date}&days={days}"
+    headers = {
+        "Authorization": f"Bearer {token.strip()}",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json",
+        "Referer": "https://hub.msot.org/",
+        "Origin": "https://hub.msot.org",
+    }
+
+    req = Request(url, headers=headers)
+    try:
+        with urlopen(req, timeout=12.0) as res:
+            if res.status == 200:
+                body = res.read().decode("utf-8")
+                return json.loads(body)
+    except HTTPError as e:
+        if e.code in (401, 403):
+            return {"error": "Authentication failed. Your MSOT session token has expired or is invalid."}
+        return {"error": f"MSOT API returned HTTP {e.code}: {e.reason}"}
+    except Exception as e:
+        return {"error": f"Network error connecting to api.msot.org: {e}"}
+
+def parse_and_sync_timetable_events(raw_data, user_id="sidd", quiet=False):
+    if isinstance(raw_data, str):
+        try:
+            raw_data = json.loads(raw_data)
+        except Exception as e:
+            if not quiet:
+                print(f"Failed to parse JSON: {e}")
+            return 0
+
+    events = []
+    if isinstance(raw_data, list):
+        events = raw_data
+    elif isinstance(raw_data, dict):
+        if "data" in raw_data:
+            d = raw_data["data"]
+            if isinstance(d, list):
+                events = d
+            elif isinstance(d, dict):
+                events = d.get("events") or d.get("timetable") or d.get("classes") or d.get("sessions") or []
+        elif "events" in raw_data:
+            events = raw_data["events"]
+        elif "timetable" in raw_data:
+            events = raw_data["timetable"]
+
+    if not isinstance(events, list):
+        events = [events]
+
+    added_count = 0
+    now_ymd = time.strftime("%Y-%m-%d")
+
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        subj = (ev.get("subject_name") or ev.get("subject") or ev.get("title") or 
+                ev.get("course_name") or ev.get("name") or ev.get("topic") or "Class").strip()
+        date_raw = ev.get("date") or ev.get("start_date") or ev.get("event_date") or now_ymd
+        date_iso = parse_date_to_iso(str(date_raw))
+
+        start_t = ev.get("start_time") or ev.get("startTime") or ""
+        end_t = ev.get("end_time") or ev.get("endTime") or ""
+        time_str = f"{start_t} - {end_t}".strip(" -") if (start_t or end_t) else ""
+
+        room = ev.get("room_no") or ev.get("room") or ev.get("venue") or ev.get("classroom") or ""
+        faculty = ev.get("faculty_name") or ev.get("faculty") or ev.get("teacher") or ""
+
+        details = []
+        if time_str:
+            details.append(time_str)
+        if room:
+            details.append(f"Room {room}" if not str(room).lower().startswith("room") else str(room))
+        if faculty:
+            details.append(str(faculty))
+
+        detail_suffix = f" ({' · '.join(details)})" if details else ""
+        task_title = f"[Class] {subj}{detail_suffix}"
+
+        ev_type = str(ev.get("type", "")).lower()
+        priority = "High" if ("exam" in ev_type or "test" in ev_type or "quiz" in ev_type or "exam" in subj.lower()) else "Normal"
+
+        res = add_workspace_task(task_title, date_str=date_iso, priority=priority, user_id=user_id, quiet=True)
+        if res:
+            added_count += 1
+            if not quiet:
+                p_badge = f"\x1b[33m({priority})\x1b[0m"
+                print(f" \x1b[32m✔\x1b[0m \x1b[36m[{date_iso}]\x1b[0m {p_badge} {task_title}")
+
+    return added_count
+
+def print_token_instructions():
+    print("""
+\x1b[1;33mMSOT Student Timetable Sync Setup\x1b[0m
+To securely link your timetable from \x1b[36mhttps://hub.msot.org/#/timetable\x1b[0m:
+
+\x1b[1mHow to grab your student authToken:\x1b[0m
+ 1. Open \x1b[36mhttps://hub.msot.org/#/timetable\x1b[0m in Google Chrome or Brave (logged in).
+ 2. Press \x1b[1mCmd + Option + I\x1b[0m (or Right Click -> \x1b[1mInspect\x1b[0m) and go to the \x1b[1mConsole\x1b[0m tab.
+ 3. Paste this command and hit Enter:
+    \x1b[32mcopy(localStorage.getItem('flutter.authToken') || localStorage.getItem('authToken'))\x1b[0m
+    \x1b[90m(This automatically copies your session token to your clipboard!)\x1b[0m
+
+\x1b[1mRun sync with:\x1b[0m
+  \x1b[32mjans timetable sync --token "<paste_token_here>"\x1b[0m
+
+Or save it permanently in your environment:
+  \x1b[32mecho 'MSOT_AUTH_TOKEN="<paste_token_here>"' >> ~/Documents/jans-track/tracker/.env.local\x1b[0m
+""")
+
+def handle_timetable_cli():
+    subcmd = sys.argv[2].lower() if len(sys.argv) > 2 and not sys.argv[2].startswith("-") else "list"
+
+    if subcmd in ("sync", "fetch", "pull"):
+        cli_token = None
+        days = 14
+        if "--token" in sys.argv:
+            idx = sys.argv.index("--token")
+            if idx + 1 < len(sys.argv):
+                cli_token = sys.argv[idx + 1]
+        if "--days" in sys.argv:
+            idx = sys.argv.index("--days")
+            if idx + 1 < len(sys.argv):
+                try:
+                    days = int(sys.argv[idx + 1])
+                except Exception:
+                    pass
+
+        token = get_or_prompt_msot_token(cli_token)
+        if not token:
+            print_token_instructions()
+            # Try interactive input if tty
+            if sys.stdin.isatty():
+                try:
+                    entered = input("\x1b[33mPaste your MSOT authToken now (or press Enter to cancel):\x1b[0m ").strip()
+                    if entered:
+                        token = entered
+                        save_msot_token(token)
+                    else:
+                        return
+                except (KeyboardInterrupt, EOFError):
+                    print("\nCancelled.")
+                    return
+            else:
+                return
+
+        print(f"\n\x1b[1mConnecting to https://api.msot.org/hub/box/student/timetable/events...\x1b[0m")
+        today_iso = time.strftime("%Y-%m-%d")
+        data = fetch_msot_timetable(token, start_date=today_iso, days=days)
+
+        if not data:
+            print("\x1b[31mError: No response from MSOT API.\x1b[0m")
+            return
+        if "error" in data:
+            print(f"\x1b[31mError: {data['error']}\x1b[0m")
+            if "Authentication failed" in data.get("error", ""):
+                print("\x1b[33mTip: Your session expired. Log in to hub.msot.org and grab a fresh token.\x1b[0m")
+            return
+
+        print(f"\n\x1b[1m📅 Parsing & Synchronizing College Timetable into SQLite...\x1b[0m\n")
+        count = parse_and_sync_timetable_events(data, user_id="sidd", quiet=False)
+        print(f"\n\x1b[32;1m✔ Synchronized {count} class schedule items into Jans Task Table!\x1b[0m")
+        print("They are now active in your Daybook calendar at http://localhost:3000\n")
+        return
+
+    if subcmd in ("import", "load"):
+        if len(sys.argv) < 4:
+            print("Usage: jans timetable import <path_to_timetable.json>")
+            return
+        fpath = sys.argv[3]
+        if not os.path.exists(fpath):
+            print(f"Error: File '{fpath}' not found.")
+            return
+        try:
+            with open(fpath, "r") as f:
+                raw = json.load(f)
+            print(f"\n\x1b[1m📅 Importing Timetable from {fpath}...\x1b[0m\n")
+            count = parse_and_sync_timetable_events(raw, user_id="sidd", quiet=False)
+            print(f"\n\x1b[32;1m✔ Successfully imported {count} classes into Jans Task Table!\x1b[0m\n")
+        except Exception as e:
+            print(f"Error reading file: {e}")
+        return
+
+    if subcmd in ("token", "set-token"):
+        if len(sys.argv) < 4:
+            print("Usage: jans timetable token '<your_authToken>'")
+            return
+        token = sys.argv[3].strip()
+        save_msot_token(token)
+        print("\x1b[32m✔ Saved MSOT authToken permanently in SQLite & tracker/.env.local!\x1b[0m")
+        print("You can now run: \x1b[1mjans timetable sync\x1b[0m anytime.")
+        return
+
+    # Default: list college classes from SQLite
+    db_path = get_db_path()
+    if not db_path:
+        print("Database not found.")
+        return
+    try:
+        con = sqlite3.connect(db_path)
+        row = con.execute("SELECT data FROM workspace_state WHERE key = 'state_sidd'").fetchone()
+        if not row:
+            row = con.execute("SELECT data FROM workspace_state WHERE key = 'current'").fetchone()
+        con.close()
+        if not row:
+            print("No workspace state found.")
+            return
+        state = json.loads(row[0])
+        classes = [t for t in state.get("tasks", []) if t.get("title", "").startswith("[Class]")]
+        if not classes:
+            print("\x1b[33mNo college classes synced yet.\x1b[0m")
+            print("Run \x1b[32mjans timetable sync\x1b[0m to sync your schedule from hub.msot.org.")
+            return
+
+        print(f"\n\x1b[1m🎓 College Timetable ({len(classes)} classes scheduled in SQLite)\x1b[0m\n")
+        classes_sorted = sorted(classes, key=lambda t: t.get("date", "9999-99-99"))
+        for c in classes_sorted:
+            status = "\x1b[32m[✓]\x1b[0m" if c.get("done") else "\x1b[31m[ ]\x1b[0m"
+            d = f"\x1b[36m[{c.get('date', 'Today')}]\x1b[0m"
+            print(f" {status} {d:18} {c.get('title')}")
+        print()
+    except Exception as e:
+        print(f"Error: {e}")
+
 def auto_extract_memories(user_text, user_id="sidd"):
     text = user_text.strip()
     cleaned = re.sub(r'^(?:hi|hello|hey|yo|ok|okay)?\s*(?:jans)?\s*[,:]?\s*', '', text, flags=re.IGNORECASE).strip()
@@ -489,6 +783,13 @@ Direct socket connection to Jans AI with Real-Time Clock, Lifelong SQLite Memory
   jans "<query>"                Ask a single question and stream response
   cat <file> | jans "<task>"    Pipe file contents or logs directly into Jans
 
+\x1b[1mCollege Timetable Sync (hub.msot.org):\x1b[0m
+  jans timetable                List synced college classes from SQLite
+  jans timetable sync           Sync live timetable from hub.msot.org
+  jans timetable sync --token T Sync with explicit student authToken
+  jans timetable import <file>  Import timetable from a JSON dump
+  jans timetable token <token>  Save MSOT authToken permanently in environment
+
 \x1b[1mTask & Calendar Management:\x1b[0m
   jans tasks                    List all scheduled tasks from SQLite
   jans tasks --date <date>      List tasks for a specific date (e.g. 2026-11-19 or "19th nov")
@@ -510,6 +811,7 @@ Direct socket connection to Jans AI with Real-Time Clock, Lifelong SQLite Memory
   JANS_URL                      Override Ollama host (default: autodetect fedora/localhost)
   JANS_MODEL                    Override model name (default: jans:latest)
   JANS_DB_PATH                  Path to jans.db SQLite file
+  MSOT_AUTH_TOKEN               Student authToken for hub.msot.org timetable sync
 """)
 
 def main():
@@ -530,6 +832,11 @@ def main():
         else:
             print("Usage: jans --remember '<fact to remember>'")
             return
+
+    # College Timetable CLI commands (runs offline or against api.msot.org)
+    if len(sys.argv) > 1 and sys.argv[1].lower() in ("timetable", "tt", "schedule"):
+        handle_timetable_cli()
+        return
 
     # Task CLI commands (run offline, directly against SQLite)
     argv_lower = [a.lower() for a in sys.argv]
