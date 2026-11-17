@@ -506,6 +506,23 @@ def fetch_msot_timetable(token, start_date=None, days=14):
     except Exception as e:
         return {"error": f"Network error connecting to api.msot.org: {e}"}
 
+def format_time_12h(time_str):
+    if not time_str:
+        return ""
+    parts = str(time_str).split(":")
+    if len(parts) >= 2:
+        try:
+            h = int(parts[0])
+            m = int(parts[1])
+            suffix = "AM" if h < 12 else "PM"
+            h12 = h % 12
+            if h12 == 0:
+                h12 = 12
+            return f"{h12:02d}:{m:02d} {suffix}"
+        except Exception:
+            pass
+    return str(time_str)
+
 def parse_and_sync_timetable_events(raw_data, user_id="sidd", quiet=False):
     if isinstance(raw_data, str):
         try:
@@ -524,9 +541,11 @@ def parse_and_sync_timetable_events(raw_data, user_id="sidd", quiet=False):
             if isinstance(d, list):
                 events = d
             elif isinstance(d, dict):
-                events = d.get("events") or d.get("timetable") or d.get("classes") or d.get("sessions") or []
+                events = d.get("list") or d.get("events") or d.get("timetable") or d.get("classes") or d.get("sessions") or []
         elif "events" in raw_data:
             events = raw_data["events"]
+        elif "list" in raw_data:
+            events = raw_data["list"]
         elif "timetable" in raw_data:
             events = raw_data["timetable"]
 
@@ -539,17 +558,34 @@ def parse_and_sync_timetable_events(raw_data, user_id="sidd", quiet=False):
     for ev in events:
         if not isinstance(ev, dict):
             continue
-        subj = (ev.get("subject_name") or ev.get("subject") or ev.get("title") or 
-                ev.get("course_name") or ev.get("name") or ev.get("topic") or "Class").strip()
-        date_raw = ev.get("date") or ev.get("start_date") or ev.get("event_date") or now_ymd
+
+        inner = ev.get("data") if isinstance(ev.get("data"), dict) else ev
+
+        subj = (inner.get("event_title") or inner.get("subject_name") or 
+                (inner.get("subject_data") or {}).get("course_name") or
+                ev.get("subject_name") or ev.get("title") or "Class").strip()
+
+        date_raw = ev.get("lecture_date") or inner.get("lecture_date") or ev.get("date") or ev.get("start_date") or now_ymd
         date_iso = parse_date_to_iso(str(date_raw))
 
-        start_t = ev.get("start_time") or ev.get("startTime") or ""
-        end_t = ev.get("end_time") or ev.get("endTime") or ""
+        start_raw = ev.get("lecture_start_time") or inner.get("lecture_start_time") or ev.get("start_time") or ""
+        end_raw = ev.get("lecture_end_time") or inner.get("lecture_end_time") or ev.get("end_time") or ""
+        start_t = format_time_12h(start_raw)
+        end_t = format_time_12h(end_raw)
         time_str = f"{start_t} - {end_t}".strip(" -") if (start_t or end_t) else ""
 
-        room = ev.get("room_no") or ev.get("room") or ev.get("venue") or ev.get("classroom") or ""
-        faculty = ev.get("faculty_name") or ev.get("faculty") or ev.get("teacher") or ""
+        prof_list = inner.get("professor") or []
+        faculty = ""
+        if prof_list and isinstance(prof_list, list) and isinstance(prof_list[0], dict):
+            faculty = prof_list[0].get("name", "")
+        if not faculty:
+            faculty = ev.get("faculty_name") or ev.get("faculty") or ev.get("teacher") or ""
+
+        room_obj = inner.get("campus_room_map_data") or {}
+        room = room_obj.get("room_no") or ev.get("room_no") or ev.get("venue") or ""
+
+        cat_obj = inner.get("category") or {}
+        cat_label = cat_obj.get("label") or inner.get("event_type") or "Class"
 
         details = []
         if time_str:
@@ -560,9 +596,9 @@ def parse_and_sync_timetable_events(raw_data, user_id="sidd", quiet=False):
             details.append(str(faculty))
 
         detail_suffix = f" ({' · '.join(details)})" if details else ""
-        task_title = f"[Class] {subj}{detail_suffix}"
+        task_title = f"[{cat_label}] {subj}{detail_suffix}"
 
-        ev_type = str(ev.get("type", "")).lower()
+        ev_type = str(cat_label).lower() + " " + str(inner.get("type", "")).lower()
         priority = "High" if ("exam" in ev_type or "test" in ev_type or "quiz" in ev_type or "exam" in subj.lower()) else "Normal"
 
         res = add_workspace_task(task_title, date_str=date_iso, priority=priority, user_id=user_id, quiet=True)
@@ -691,7 +727,12 @@ def handle_timetable_cli():
             print("No workspace state found.")
             return
         state = json.loads(row[0])
-        classes = [t for t in state.get("tasks", []) if t.get("title", "").startswith("[Class]")]
+        classes = [
+            t for t in state.get("tasks", [])
+            if t.get("title", "").startswith("[") and any(
+                k in t.get("title", "") for k in ("Lecture", "Class", "Lab", "Exam", "Extra Curricular")
+            )
+        ]
         if not classes:
             print("\x1b[33mNo college classes synced yet.\x1b[0m")
             print("Run \x1b[32mjans timetable sync\x1b[0m to sync your schedule from hub.msot.org.")

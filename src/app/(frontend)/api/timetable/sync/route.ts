@@ -1,13 +1,28 @@
 import { NextRequest } from 'next/server'
 import { addTask, getWorkspaceState, saveWorkspaceState, TaskRecord } from '@/lib/db'
 
+function formatTime12h(timeStr?: string): string {
+  if (!timeStr) return ''
+  const parts = String(timeStr).split(':')
+  if (parts.length >= 2) {
+    const h = parseInt(parts[0], 10)
+    const m = parts[1]
+    if (!isNaN(h)) {
+      const suffix = h < 12 ? 'AM' : 'PM'
+      const h12 = h % 12 === 0 ? 12 : h % 12
+      return `${String(h12).padStart(2, '0')}:${m} ${suffix}`
+    }
+  }
+  return String(timeStr)
+}
+
 export async function GET(request: NextRequest) {
   try {
     const userId = request.nextUrl.searchParams.get('user') || 'sidd'
     const state = getWorkspaceState(userId) || {}
     const hasToken = Boolean(process.env.MSOT_AUTH_TOKEN)
     const collegeClasses = (state.tasks || []).filter((t: TaskRecord) =>
-      t.title.startsWith('[Class]'),
+      t.title.startsWith('[') && (t.title.includes('Lecture') || t.title.includes('Class') || t.title.includes('Exam') || t.title.includes('Lab')),
     )
 
     return Response.json({
@@ -39,7 +54,8 @@ export async function POST(request: NextRequest) {
       const res = await fetch(url, {
         headers: {
           Authorization: `Bearer ${token}`,
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'User-Agent':
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
           Accept: 'application/json',
           Referer: 'https://hub.msot.org/',
           Origin: 'https://hub.msot.org',
@@ -67,10 +83,12 @@ export async function POST(request: NextRequest) {
         if (Array.isArray(data.data)) {
           events = data.data
         } else if (typeof data.data === 'object') {
-          events = data.data.events || data.data.timetable || data.data.classes || []
+          events = data.data.list || data.data.events || data.data.timetable || data.data.classes || []
         }
       } else if (data?.events) {
         events = data.events
+      } else if (data?.list) {
+        events = data.list
       }
     } else {
       return Response.json(
@@ -90,15 +108,37 @@ export async function POST(request: NextRequest) {
 
     for (const ev of events) {
       if (!ev || typeof ev !== 'object') continue
-      const subj = (ev.subject_name || ev.subject || ev.title || ev.course_name || ev.name || 'Class').trim()
-      const dateIso = (ev.date || ev.start_date || todayYmd).split('T')[0]
 
-      const startT = ev.start_time || ev.startTime || ''
-      const endT = ev.end_time || ev.endTime || ''
+      const inner = ev.data && typeof ev.data === 'object' ? ev.data : ev
+
+      const subj = (
+        inner.event_title ||
+        inner.subject_name ||
+        inner.subject_data?.course_name ||
+        ev.subject_name ||
+        ev.title ||
+        'Class'
+      ).trim()
+
+      const dateIso = (ev.lecture_date || inner.lecture_date || ev.date || ev.start_date || todayYmd).split('T')[0]
+
+      const startRaw = ev.lecture_start_time || inner.lecture_start_time || ev.start_time || ''
+      const endRaw = ev.lecture_end_time || inner.lecture_end_time || ev.end_time || ''
+      const startT = formatTime12h(startRaw)
+      const endT = formatTime12h(endRaw)
       const timeStr = `${startT} - ${endT}`.replace(/^ - |- $/g, '').trim()
 
-      const room = ev.room_no || ev.room || ev.venue || ev.classroom || ''
-      const faculty = ev.faculty_name || ev.faculty || ev.teacher || ''
+      const profList = Array.isArray(inner.professor) ? inner.professor : []
+      let faculty = profList[0]?.name || ''
+      if (!faculty) {
+        faculty = ev.faculty_name || ev.faculty || ev.teacher || ''
+      }
+
+      const roomObj = inner.campus_room_map_data || {}
+      const room = roomObj.room_no || ev.room_no || ev.venue || ''
+
+      const catObj = inner.category || {}
+      const catLabel = catObj.label || inner.event_type || 'Class'
 
       const details: string[] = []
       if (timeStr) details.push(timeStr)
@@ -106,10 +146,14 @@ export async function POST(request: NextRequest) {
       if (faculty) details.push(String(faculty))
 
       const suffix = details.length > 0 ? ` (${details.join(' · ')})` : ''
-      const taskTitle = `[Class] ${subj}${suffix}`
+      const taskTitle = `[${catLabel}] ${subj}${suffix}`
 
-      const evType = String(ev.type || '').toLowerCase()
-      const isExam = evType.includes('exam') || evType.includes('test') || evType.includes('quiz') || subj.toLowerCase().includes('exam')
+      const evType = `${catLabel} ${inner.type || ''}`.toLowerCase()
+      const isExam =
+        evType.includes('exam') ||
+        evType.includes('test') ||
+        evType.includes('quiz') ||
+        subj.toLowerCase().includes('exam')
       const priority: 'High' | 'Normal' = isExam ? 'High' : 'Normal'
 
       // Avoid duplicate exact class on same date
@@ -138,7 +182,7 @@ export async function POST(request: NextRequest) {
       success: true,
       addedCount: addedTasks.length,
       tasks: addedTasks,
-      totalClasses: existingTasks.filter((t) => t.title.startsWith('[Class]')).length,
+      totalClasses: existingTasks.filter((t) => t.title.startsWith('[')).length,
     })
   } catch (error: any) {
     return Response.json({ error: error?.message || 'Failed to sync timetable.' }, { status: 500 })
