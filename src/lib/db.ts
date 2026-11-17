@@ -658,3 +658,71 @@ export function getSmartMemoryContext(query: string, userId: string = 'sidd'): s
     `CRITICAL MEMORY DIRECTIVE: You already know these facts deeply about ${userName}. Reflect them naturally in your advice without asking ${userName} to re-explain things already stored in your memory.`
   )
 }
+
+export type TaskRecord = {
+  id: string
+  title: string
+  done: boolean
+  priority: 'High' | 'Normal'
+  date?: string // 'YYYY-MM-DD'
+  time?: string
+  createdAt?: string
+}
+
+export function addTask(
+  userId: string = 'sidd',
+  task: { title: string; priority?: 'High' | 'Normal'; date?: string; time?: string },
+): TaskRecord {
+  const cleanUser = userId.toLowerCase() === 'jahnavi' ? 'jahnavi' : 'sidd'
+  const state = getWorkspaceState(cleanUser) || { tasks: [] }
+  const tasks: TaskRecord[] = Array.isArray(state.tasks) ? state.tasks : []
+
+  const today = new Date().toISOString().split('T')[0]
+  const newTask: TaskRecord = {
+    id: `task-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    title: task.title.trim(),
+    done: false,
+    priority: task.priority || 'Normal',
+    date: task.date || today,
+    time: task.time,
+    createdAt: new Date().toISOString(),
+  }
+
+  tasks.unshift(newTask)
+  state.tasks = tasks
+  saveWorkspaceState(state, cleanUser)
+  return newTask
+}
+
+export function listTasks(userId: string = 'sidd', date?: string): TaskRecord[] {
+  const cleanUser = userId.toLowerCase() === 'jahnavi' ? 'jahnavi' : 'sidd'
+  const state = getWorkspaceState(cleanUser) || { tasks: [] }
+  const tasks: TaskRecord[] = Array.isArray(state.tasks) ? state.tasks : []
+  if (!date) return tasks
+  const today = new Date().toISOString().split('T')[0]
+  return tasks.filter((t) => t.date === date || (!t.date && date === today))
+}
+
+export function toggleTask(id: string, userId: string = 'sidd'): TaskRecord | null {
+  const cleanUser = userId.toLowerCase() === 'jahnavi' ? 'jahnavi' : 'sidd'
+  const state = getWorkspaceState(cleanUser) || { tasks: [] }
+  const tasks: TaskRecord[] = Array.isArray(state.tasks) ? state.tasks : []
+  const task = tasks.find((t) => t.id === id)
+  if (!task) return null
+  task.done = !task.done
+  saveWorkspaceState(state, cleanUser)
+  return task
+}
+
+export function deleteTask(id: string, userId: string = 'sidd'): boolean {
+  const cleanUser = userId.toLowerCase() === 'jahnavi' ? 'jahnavi' : 'sidd'
+  const state = getWorkspaceState(cleanUser) || { tasks: [] }
+  const tasks: TaskRecord[] = Array.isArray(state.tasks) ? state.tasks : []
+  const prevLen = tasks.length
+  state.tasks = tasks.filter((t) => t.id !== id)
+  if (state.tasks.length !== prevLen) {
+    saveWorkspaceState(state, cleanUser)
+    return true
+  }
+  return false
+}

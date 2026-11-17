@@ -46,6 +46,9 @@ type Task = {
   title: string
   done: boolean
   priority: 'High' | 'Normal'
+  date?: string // 'YYYY-MM-DD'
+  time?: string
+  createdAt?: string
 }
 
 type Habit = {
@@ -1012,6 +1015,7 @@ export function DaybookApp() {
                 }
               }
               if (type === 'Task') {
+                const todayIso = new Date().toISOString().split('T')[0]
                 return {
                   ...current,
                   tasks: [
@@ -1019,7 +1023,9 @@ export function DaybookApp() {
                       id,
                       title: form.title,
                       done: false,
-                      priority: form.label === 'High' ? 'High' : 'Normal',
+                      priority: (form.priority || form.label) === 'High' ? 'High' : 'Normal',
+                      date: form.date || todayIso,
+                      createdAt: now,
                     },
                     ...current.tasks,
                   ],
@@ -1093,6 +1099,133 @@ function TodayView({
   onNavigate: (section: Section) => void
 }) {
   const [briefOpen, setBriefOpen] = useState(false)
+
+  // Interactive Calendar & Date Navigation State
+  const todayIso = useMemo(() => new Date().toISOString().split('T')[0], [])
+  const [selectedDate, setSelectedDate] = useState(todayIso)
+  const [showMonthGrid, setShowMonthGrid] = useState(false)
+  const [filterMode, setFilterMode] = useState<'day' | 'all'>('day')
+  const [quickTitle, setQuickTitle] = useState('')
+  const [quickPriority, setQuickPriority] = useState<'Normal' | 'High'>('Normal')
+
+  const targetDate = useMemo(() => new Date(selectedDate + 'T00:00:00'), [selectedDate])
+  const todayDate = useMemo(() => new Date(todayIso + 'T00:00:00'), [todayIso])
+
+  const diffDays = Math.round((targetDate.getTime() - todayDate.getTime()) / (1000 * 60 * 60 * 24))
+  const isToday = selectedDate === todayIso
+  const relativeBadge = isToday
+    ? 'TODAY'
+    : diffDays === 1
+    ? 'TOMORROW'
+    : diffDays === -1
+    ? 'YESTERDAY'
+    : diffDays > 0
+    ? `IN ${diffDays} DAYS`
+    : `${Math.abs(diffDays)} DAYS AGO`
+
+  const formattedSelectedDate = useMemo(() => {
+    return new Intl.DateTimeFormat('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+    }).format(targetDate)
+  }, [targetDate])
+
+  function navigateDay(offset: number) {
+    const d = new Date(selectedDate + 'T00:00:00')
+    d.setDate(d.getDate() + offset)
+    setSelectedDate(d.toISOString().split('T')[0])
+  }
+
+  // 7-day strip centered around selectedDate
+  const weekStrip = useMemo(() => {
+    const days: Array<{
+      iso: string
+      dayName: string
+      dayNum: number
+      isToday: boolean
+      isSelected: boolean
+      count: number
+    }> = []
+    for (let offset = -3; offset <= 3; offset++) {
+      const d = new Date(targetDate)
+      d.setDate(d.getDate() + offset)
+      const iso = d.toISOString().split('T')[0]
+      const count = store.tasks.filter((t) => (t.date || todayIso) === iso).length
+      days.push({
+        iso,
+        dayName: d.toLocaleDateString('en-US', { weekday: 'short' }),
+        dayNum: d.getDate(),
+        isToday: iso === todayIso,
+        isSelected: iso === selectedDate,
+        count,
+      })
+    }
+    return days
+  }, [targetDate, selectedDate, store.tasks, todayIso])
+
+  // Month grid days (1..daysInMonth)
+  const monthDays = useMemo(() => {
+    const year = targetDate.getFullYear()
+    const month = targetDate.getMonth()
+    const daysInMonth = new Date(year, month + 1, 0).getDate()
+    const firstDayIndex = (new Date(year, month, 1).getDay() + 6) % 7 // Monday = 0
+
+    const days: Array<{
+      iso: string
+      dayNum: number
+      count: number
+      isToday: boolean
+      isSelected: boolean
+    }> = []
+
+    for (let day = 1; day <= daysInMonth; day++) {
+      const iso = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+      const count = store.tasks.filter((t) => (t.date || todayIso) === iso).length
+      days.push({
+        iso,
+        dayNum: day,
+        count,
+        isToday: iso === todayIso,
+        isSelected: iso === selectedDate,
+      })
+    }
+    return { days, firstDayIndex, monthName: targetDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) }
+  }, [targetDate, selectedDate, store.tasks, todayIso])
+
+  // Filter tasks based on view mode
+  const filteredTasks = useMemo(() => {
+    if (filterMode === 'all') return store.tasks
+    return store.tasks.filter((t) => (t.date || todayIso) === selectedDate)
+  }, [filterMode, store.tasks, selectedDate, todayIso])
+
+  const dayCompleted = filteredTasks.filter((t) => t.done).length
+
+  function handleQuickAdd(e: FormEvent) {
+    e.preventDefault()
+    if (!quickTitle.trim()) return
+    const newTask: Task = {
+      id: `task-${Date.now()}`,
+      title: quickTitle.trim(),
+      done: false,
+      priority: quickPriority,
+      date: selectedDate,
+      createdAt: new Date().toISOString(),
+    }
+    setStore((current) => ({
+      ...current,
+      tasks: [newTask, ...current.tasks],
+    }))
+    setQuickTitle('')
+  }
+
+  function deleteTask(id: string, e: React.MouseEvent) {
+    e.stopPropagation()
+    setStore((current) => ({
+      ...current,
+      tasks: current.tasks.filter((t) => t.id !== id),
+    }))
+  }
 
   return (
     <>
@@ -1172,52 +1305,299 @@ function TodayView({
 
       <section className="mt-8 grid gap-8 xl:grid-cols-[1fr_320px]">
         <div>
-          <div className="mb-3 flex items-end justify-between">
+          {/* Calendar & Date Navigator Bar */}
+          <div className="mb-4 border-2 border-[#20211f] bg-[#f3efe3] p-3 shadow-[3px_3px_0_#20211f]">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b-2 border-[#20211f] pb-2.5">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => navigateDay(-1)}
+                  className="grid h-7 w-7 place-items-center border-2 border-[#20211f] bg-white text-[12px] font-black transition hover:bg-[#ffca3a] active:translate-x-[1px] active:translate-y-[1px]"
+                  title="Previous Day"
+                >
+                  ◀
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigateDay(1)}
+                  className="grid h-7 w-7 place-items-center border-2 border-[#20211f] bg-white text-[12px] font-black transition hover:bg-[#ffca3a] active:translate-x-[1px] active:translate-y-[1px]"
+                  title="Next Day"
+                >
+                  ▶
+                </button>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-[11px] font-black uppercase text-[#20211f]">
+                    📅 {formattedSelectedDate}
+                  </span>
+                  <span
+                    className={`border border-[#20211f] px-1.5 py-0.5 font-mono text-[8px] font-black uppercase ${
+                      isToday
+                        ? 'bg-[#ffca3a] text-[#20211f]'
+                        : diffDays > 0
+                        ? 'bg-[#dfe5da] text-[#20211f]'
+                        : 'bg-white text-[#777d74]'
+                    }`}
+                  >
+                    {relativeBadge}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {!isToday && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDate(todayIso)}
+                    className="border border-[#20211f] bg-white px-2 py-1 font-mono text-[8px] font-black uppercase text-[#20211f] transition hover:bg-[#ffca3a]"
+                  >
+                    Jump to Today
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowMonthGrid((prev) => !prev)}
+                  className={`border border-[#20211f] px-2 py-1 font-mono text-[8px] font-black uppercase transition ${
+                    showMonthGrid
+                      ? 'bg-[#20211f] text-[#ffca3a]'
+                      : 'bg-white text-[#20211f] hover:bg-[#dfe5da]'
+                  }`}
+                >
+                  {showMonthGrid ? '✕ Close Calendar' : '📅 Month Grid'}
+                </button>
+              </div>
+            </div>
+
+            {/* Interactive 7-Day Strip */}
+            <div className="mt-3 grid grid-cols-7 gap-1 sm:gap-2">
+              {weekStrip.map((day) => (
+                <button
+                  key={day.iso}
+                  type="button"
+                  onClick={() => setSelectedDate(day.iso)}
+                  className={`flex flex-col items-center justify-center border-2 border-[#20211f] p-1.5 transition active:translate-x-[1px] active:translate-y-[1px] ${
+                    day.isSelected
+                      ? 'bg-[#ffca3a] shadow-[2px_2px_0_#20211f]'
+                      : day.isToday
+                      ? 'bg-[#dfe5da] hover:bg-[#edf0e9]'
+                      : 'bg-white hover:bg-[#fff9dd]'
+                  }`}
+                >
+                  <span className="font-mono text-[8px] font-black uppercase text-[#697067]">
+                    {day.dayName}
+                  </span>
+                  <span className="text-[13px] font-black leading-tight text-[#20211f]">
+                    {day.dayNum}
+                  </span>
+                  <div className="mt-1 flex h-3 items-center">
+                    {day.count > 0 ? (
+                      <span className="rounded-full bg-[#e66b3c] px-1 font-mono text-[7px] font-bold text-white">
+                        {day.count}
+                      </span>
+                    ) : day.isToday ? (
+                      <span className="h-1 w-1 rounded-full bg-[#20211f]" />
+                    ) : null}
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            {/* Expandable Month Grid */}
+            {showMonthGrid && (
+              <div className="mt-3 border-t-2 border-[#20211f] pt-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="font-mono text-[9px] font-black uppercase tracking-wider text-[#20211f]">
+                    {monthDays.monthName}
+                  </span>
+                  <span className="font-mono text-[8px] text-[#777d74]">
+                    Click any day to browse tasks
+                  </span>
+                </div>
+                <div className="grid grid-cols-7 gap-1 text-center font-mono text-[8px] font-black text-[#697067]">
+                  {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
+                    <div key={d} className="py-0.5">
+                      {d}
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-1 grid grid-cols-7 gap-1">
+                  {Array.from({ length: monthDays.firstDayIndex }).map((_, i) => (
+                    <div key={`empty-${i}`} className="p-2" />
+                  ))}
+                  {monthDays.days.map((day) => (
+                    <button
+                      key={day.iso}
+                      type="button"
+                      onClick={() => {
+                        setSelectedDate(day.iso)
+                        setShowMonthGrid(false)
+                      }}
+                      className={`flex flex-col items-center justify-center border border-[#20211f] p-1.5 transition ${
+                        day.isSelected
+                          ? 'bg-[#ffca3a] font-black shadow-[2px_2px_0_#20211f]'
+                          : day.isToday
+                          ? 'bg-[#dfe5da] font-bold'
+                          : 'bg-white hover:bg-[#fff9dd]'
+                      }`}
+                    >
+                      <span className="text-[10px]">{day.dayNum}</span>
+                      {day.count > 0 && (
+                        <span className="mt-0.5 rounded-full bg-[#e66b3c] px-1 font-mono text-[6px] font-bold text-white">
+                          {day.count}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Focus Queue Header with Filters */}
+          <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
             <div>
               <p className="font-mono text-[9px] font-black uppercase tracking-[0.16em] text-[#777d74]">
-                Focus queue
+                Focus queue · {relativeBadge}
               </p>
-              <h2 className="mt-1 text-xl font-black tracking-[-0.035em]">What matters today</h2>
+              <h2 className="mt-1 text-xl font-black tracking-[-0.035em]">
+                {isToday
+                  ? 'What matters today'
+                  : diffDays > 0
+                  ? `Scheduled for ${formattedSelectedDate}`
+                  : `Archived for ${formattedSelectedDate}`}
+              </h2>
             </div>
-            <button
-              onClick={() => onCapture('Task')}
-              className="flex items-center gap-1 font-mono text-[9px] font-black uppercase"
-            >
-              <Icon name="plus" size={13} /> Add task
-            </button>
-          </div>
-          <div className="border-t-2 border-[#20211f]">
-            {store.tasks.map((task, index) => (
-              <button
-                key={task.id}
-                onClick={() =>
-                  setStore((current) => ({
-                    ...current,
-                    tasks: current.tasks.map((item) =>
-                      item.id === task.id ? { ...item, done: !item.done } : item,
-                    ),
-                  }))
-                }
-                className="grid w-full grid-cols-[32px_1fr_auto] items-center gap-3 border-b border-[#20211f] py-4 text-left"
-              >
-                <span
-                  className={`grid h-6 w-6 place-items-center border-2 border-[#20211f] text-[11px] ${task.done ? 'bg-[#75a38a]' : 'bg-white'}`}
+
+            <div className="flex items-center gap-2">
+              <div className="flex border-2 border-[#20211f]">
+                <button
+                  type="button"
+                  onClick={() => setFilterMode('day')}
+                  className={`px-2.5 py-1 font-mono text-[8px] font-black uppercase transition ${
+                    filterMode === 'day' ? 'bg-[#ffca3a] text-[#20211f]' : 'bg-white text-[#777d74]'
+                  }`}
                 >
-                  {task.done && '✓'}
-                </span>
-                <span>
-                  <strong
-                    className={`block text-[12px] ${task.done ? 'text-[#81867e] line-through' : ''}`}
-                  >
-                    {task.title}
-                  </strong>
-                  <small className="font-mono text-[8px] uppercase text-[#858a82]">
-                    0{index + 1} · {task.priority} priority
-                  </small>
-                </span>
-                <Icon name="arrow" size={13} />
+                  Day ({dayCompleted}/{filteredTasks.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFilterMode('all')}
+                  className={`border-l border-[#20211f] px-2.5 py-1 font-mono text-[8px] font-black uppercase transition ${
+                    filterMode === 'all' ? 'bg-[#ffca3a] text-[#20211f]' : 'bg-white text-[#777d74]'
+                  }`}
+                >
+                  All ({store.tasks.length})
+                </button>
+              </div>
+
+              <button
+                onClick={() => onCapture('Task')}
+                className="flex items-center gap-1 border-2 border-[#20211f] bg-white px-2.5 py-1 font-mono text-[8px] font-black uppercase shadow-[2px_2px_0_#20211f] transition hover:bg-[#ffca3a]"
+              >
+                <Icon name="plus" size={12} /> Modal Add
               </button>
-            ))}
+            </div>
+          </div>
+
+          {/* Inline Quick Task Scheduler for Selected Date */}
+          <form
+            onSubmit={handleQuickAdd}
+            className="mb-4 grid gap-2 border-2 border-[#20211f] bg-white p-2 shadow-[2px_2px_0_#20211f] sm:grid-cols-[1fr_100px_auto]"
+          >
+            <input
+              type="text"
+              value={quickTitle}
+              onChange={(e) => setQuickTitle(e.target.value)}
+              placeholder={`Add task for ${formattedSelectedDate}...`}
+              className="border border-[#20211f] px-3 py-1.5 text-[11px] outline-none focus:bg-[#fff9dd]"
+            />
+            <select
+              value={quickPriority}
+              onChange={(e) => setQuickPriority(e.target.value as 'Normal' | 'High')}
+              className="border border-[#20211f] bg-white px-2 py-1.5 font-mono text-[9px] font-bold text-[#20211f] outline-none"
+            >
+              <option value="Normal">Normal</option>
+              <option value="High">High</option>
+            </select>
+            <button
+              type="submit"
+              disabled={!quickTitle.trim()}
+              className="border-2 border-[#20211f] bg-[#e66b3c] px-3 py-1.5 font-mono text-[9px] font-black uppercase text-white shadow-[1px_1px_0_#20211f] transition hover:bg-[#ff7b4d] active:translate-x-[1px] active:translate-y-[1px] disabled:opacity-50"
+            >
+              + Add
+            </button>
+          </form>
+
+          {/* Task List */}
+          <div className="border-t-2 border-[#20211f]">
+            {filteredTasks.length === 0 ? (
+              <div className="border-b border-[#20211f] py-8 text-center">
+                <p className="font-mono text-[10px] text-[#737970]">
+                  No tasks scheduled for {formattedSelectedDate}.
+                </p>
+                <p className="mt-1 text-[11px] text-[#858a82]">
+                  Add a focus item or study block above, or schedule one via terminal (`jans task add`).
+                </p>
+              </div>
+            ) : (
+              filteredTasks.map((task, index) => (
+                <div
+                  key={task.id}
+                  onClick={() =>
+                    setStore((current) => ({
+                      ...current,
+                      tasks: current.tasks.map((item) =>
+                        item.id === task.id ? { ...item, done: !item.done } : item,
+                      ),
+                    }))
+                  }
+                  className="grid w-full cursor-pointer grid-cols-[28px_1fr_auto] items-center gap-3 border-b border-[#20211f] py-3.5 text-left transition hover:bg-[#fffdf7]"
+                >
+                  <span
+                    className={`grid h-6 w-6 place-items-center border-2 border-[#20211f] text-[11px] ${
+                      task.done ? 'bg-[#75a38a] text-white' : 'bg-white'
+                    }`}
+                  >
+                    {task.done && '✓'}
+                  </span>
+                  <div>
+                    <strong
+                      className={`block text-[12px] leading-tight ${
+                        task.done ? 'text-[#81867e] line-through' : 'text-[#20211f]'
+                      }`}
+                    >
+                      {task.title}
+                    </strong>
+                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                      <span className="font-mono text-[8px] uppercase text-[#858a82]">
+                        #{index + 1}
+                      </span>
+                      <span
+                        className={`border border-[#20211f] px-1 py-0.2 font-mono text-[7px] font-black uppercase ${
+                          task.priority === 'High'
+                            ? 'bg-[#e66b3c] text-white'
+                            : 'bg-[#dfe5da] text-[#20211f]'
+                        }`}
+                      >
+                        {task.priority} Priority
+                      </span>
+                      {task.date && (
+                        <span className="font-mono text-[8px] text-[#697067]">
+                          📅 {task.date}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={(e) => deleteTask(task.id, e)}
+                    className="grid h-7 w-7 place-items-center border border-[#20211f] text-[#8b4c36] transition hover:bg-[#e66b3c] hover:text-white"
+                    title="Delete task"
+                  >
+                    <Icon name="trash" size={12} />
+                  </button>
+                </div>
+              ))
+            )}
           </div>
         </div>
 
@@ -3474,7 +3854,14 @@ function CaptureModal({
   onClose: () => void
   onSave: (
     type: CaptureType,
-    form: { title: string; body: string; label: string; description: string },
+    form: {
+      title: string
+      body: string
+      label: string
+      description: string
+      date?: string
+      priority?: 'High' | 'Normal'
+    },
   ) => void
 }) {
   const [type, setType] = useState<CaptureType>(initialType)
@@ -3490,6 +3877,8 @@ function CaptureModal({
       body,
       label: String(data.get('label') || '').trim(),
       description: String(data.get('description') || '').trim(),
+      date: String(data.get('date') || '').trim() || new Date().toISOString().split('T')[0],
+      priority: (String(data.get('label') || '').trim() as 'High' | 'Normal') || 'Normal',
     })
   }
 
@@ -3565,26 +3954,39 @@ function CaptureModal({
             </label>
           )}
           {(type === 'Note' || type === 'Command' || type === 'Task') && (
-            <label className="grid gap-1.5 font-mono text-[8px] font-black uppercase tracking-[0.1em]">
-              {type === 'Task' ? 'Priority' : 'Label'}
-              {type === 'Task' ? (
-                <select
-                  name="label"
-                  className="h-11 border-2 border-[#20211f] bg-white px-3 font-sans text-[12px] normal-case tracking-normal outline-none"
-                >
-                  <option>Normal</option>
-                  <option>High</option>
-                </select>
-              ) : (
-                <input
-                  name="label"
-                  className="h-11 border-2 border-[#20211f] bg-white px-3 font-sans text-[12px] normal-case tracking-normal outline-none"
-                  placeholder={
-                    type === 'Command' ? 'Git, Shell, Network...' : 'Planning, Idea, Reference...'
-                  }
-                />
+            <div className={`grid gap-3 ${type === 'Task' ? 'sm:grid-cols-2' : ''}`}>
+              <label className="grid gap-1.5 font-mono text-[8px] font-black uppercase tracking-[0.1em]">
+                {type === 'Task' ? 'Priority' : 'Label'}
+                {type === 'Task' ? (
+                  <select
+                    name="label"
+                    className="h-11 border-2 border-[#20211f] bg-white px-3 font-sans text-[12px] normal-case tracking-normal outline-none"
+                  >
+                    <option>Normal</option>
+                    <option>High</option>
+                  </select>
+                ) : (
+                  <input
+                    name="label"
+                    className="h-11 border-2 border-[#20211f] bg-white px-3 font-sans text-[12px] normal-case tracking-normal outline-none"
+                    placeholder={
+                      type === 'Command' ? 'Git, Shell, Network...' : 'Planning, Idea, Reference...'
+                    }
+                  />
+                )}
+              </label>
+              {type === 'Task' && (
+                <label className="grid gap-1.5 font-mono text-[8px] font-black uppercase tracking-[0.1em]">
+                  Scheduled Date
+                  <input
+                    type="date"
+                    name="date"
+                    defaultValue={new Date().toISOString().split('T')[0]}
+                    className="h-11 border-2 border-[#20211f] bg-white px-3 font-sans text-[12px] normal-case tracking-normal outline-none focus:bg-[#fff9dd]"
+                  />
+                </label>
               )}
-            </label>
+            </div>
           )}
           <div className="mt-2 flex justify-end gap-2 border-t-2 border-[#20211f] pt-4">
             <button

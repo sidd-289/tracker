@@ -259,6 +259,160 @@ def record_memory(fact, category="general", importance=4, user_id="sidd", quiet=
     except Exception:
         pass
 
+def parse_date_to_iso(date_str):
+    import datetime
+    now = datetime.datetime.now()
+    raw = date_str.lower().strip()
+    iso_match = re.search(r'(\d{4})-(\d{1,2})-(\d{1,2})', raw)
+    if iso_match:
+        y, m, d = iso_match.groups()
+        try:
+            return datetime.date(int(y), int(m), int(d)).strftime('%Y-%m-%d')
+        except Exception:
+            pass
+    if 'today' in raw:
+        return now.strftime('%Y-%m-%d')
+    if 'tomorrow' in raw:
+        return (now + datetime.timedelta(days=1)).strftime('%Y-%m-%d')
+    cleaned = re.sub(r'(\d+)(st|nd|rd|th)', r'\1', raw)
+    months = {
+        'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+        'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
+    }
+    found_month = now.month
+    for m, m_num in months.items():
+        if m in cleaned:
+            found_month = m_num
+            break
+    day_match = re.search(r'\b(\d{1,2})\b', cleaned)
+    if day_match:
+        day = int(day_match.group(1))
+        try:
+            return datetime.date(now.year, found_month, day).strftime('%Y-%m-%d')
+        except Exception:
+            pass
+    return now.strftime('%Y-%m-%d')
+
+def add_workspace_task(title, date_str=None, priority="Normal", user_id="sidd", quiet=False):
+    db_path = get_db_path()
+    if not db_path:
+        if not quiet:
+            print("Database not found.")
+        return None
+    try:
+        con = sqlite3.connect(db_path)
+        key = f"state_{user_id.lower()}"
+        row = con.execute("SELECT data FROM workspace_state WHERE key = ?", (key,)).fetchone()
+        if not row and user_id.lower() == "sidd":
+            row = con.execute("SELECT data FROM workspace_state WHERE key = 'current'").fetchone()
+
+        state = json.loads(row[0]) if row else {}
+        tasks = state.get("tasks", [])
+
+        if not date_str:
+            date_str = time.strftime("%Y-%m-%d", time.localtime())
+        else:
+            date_str = parse_date_to_iso(date_str)
+
+        task_id = f"task-{int(time.time()*1000)}"
+        new_task = {
+            "id": task_id,
+            "title": title.strip(),
+            "done": False,
+            "priority": priority,
+            "date": date_str,
+            "createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+
+        # Avoid duplicate identical task on same date
+        existing = [t for t in tasks if t.get("title", "").lower() == title.strip().lower() and t.get("date") == date_str]
+        if not existing:
+            tasks.insert(0, new_task)
+            state["tasks"] = tasks
+            now_iso = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+            con.execute(
+                "INSERT INTO workspace_state (key, data, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at",
+                (key, json.dumps(state), now_iso)
+            )
+            if user_id.lower() == "sidd":
+                con.execute(
+                    "INSERT INTO workspace_state (key, data, updated_at) VALUES ('current', ?, ?) ON CONFLICT(key) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at",
+                    (json.dumps(state), now_iso)
+                )
+            con.commit()
+            if not quiet:
+                print(f"\x1b[32m✔ Added to Task Table [{date_str}]:\x1b[0m {title.strip()} ({priority} priority)")
+        con.close()
+        return new_task
+    except Exception as e:
+        if not quiet:
+            print(f"Error saving task: {e}")
+        return None
+
+def list_workspace_tasks(user_id="sidd", filter_date=None):
+    db_path = get_db_path()
+    if not db_path:
+        print("Database not found.")
+        return
+    try:
+        con = sqlite3.connect(db_path)
+        key = f"state_{user_id.lower()}"
+        row = con.execute("SELECT data FROM workspace_state WHERE key = ?", (key,)).fetchone()
+        con.close()
+        if not row:
+            print("No workspace tasks found.")
+            return
+        state = json.loads(row[0])
+        tasks = state.get("tasks", [])
+        if filter_date:
+            iso_filter = parse_date_to_iso(filter_date)
+            tasks = [t for t in tasks if t.get("date") == iso_filter]
+
+        if not tasks:
+            print(f"\x1b[33mNo tasks scheduled{f' for {filter_date}' if filter_date else ''}.\x1b[0m")
+            return
+
+        print(f"\n\x1b[1m📋 Jans Task Table ({len(tasks)} tasks scheduled in SQLite)\x1b[0m\n")
+        tasks_sorted = sorted(tasks, key=lambda t: t.get("date", "9999-99-99"))
+        for t in tasks_sorted:
+            status = "\x1b[32m[✓]\x1b[0m" if t.get("done") else "\x1b[31m[ ]\x1b[0m"
+            d = f"\x1b[36m[{t.get('date', 'Today')}]\x1b[0m"
+            p = f"\x1b[33m({t.get('priority', 'Normal')})\x1b[0m"
+            print(f" {status} {d:18} {p:10} {t.get('title')}")
+        print()
+    except Exception as e:
+        print(f"Error reading tasks: {e}")
+
+def auto_extract_tasks(user_text, user_id="sidd"):
+    text = user_text.strip()
+    # 1. Exams
+    exam_patterns = [
+        r'(?:my\s+)?([a-zA-Z\s]{2,25}?)\s+exam\s+(?:is\s+)?on\s+([0-9a-zA-Z\s,]+?)(?:\s+and\s+|\.|\n|$)',
+    ]
+    cleaned = re.sub(r'^(?:hi|hello|hey|yo|ok|okay)?\s*(?:jans)?\s*[,:]?\s*', '', text, flags=re.IGNORECASE).strip()
+    for pat in exam_patterns:
+        for subj, date_val in re.findall(pat, cleaned, re.IGNORECASE):
+            s_title = f"{subj.strip().title()} Exam"
+            add_workspace_task(s_title, date_val.strip(), priority="High", user_id=user_id, quiet=False)
+
+    # 2. Hourly revision / study commitments e.g. "give 1hr to physics on 19th nov and 1hr to maths on 20th nov"
+    clauses = re.split(r'\s+(?:and|also)\s+|,\s*', text)
+    pat_hr = r'(?:give|spend|dedicate)?\s*(\d+\s*(?:hr|hour|min)s?)\s+to\s+([a-zA-Z\s]+?)\s+(?:on|for)\s+([0-9a-zA-Z\s,]+)'
+    for c in clauses:
+        m = re.search(pat_hr, c, re.IGNORECASE)
+        if m:
+            dur, subject, date_val = m.groups()
+            task_title = f"{subject.strip().title()} Revision ({dur.strip()})"
+            add_workspace_task(task_title, date_val.strip(), priority="Normal", user_id=user_id, quiet=False)
+
+    # 3. Explicit task addition e.g. "add task: review webkit audio on 18th nov"
+    pat_explicit = r'(?:add\s+task|schedule|task|todo):\s*(.+?)(?:\s+(?:on|for)\s+([0-9a-zA-Z\s,]+?))?(?:\.|\n|$)'
+    m_exp = re.search(pat_explicit, text, re.IGNORECASE)
+    if m_exp:
+        t_title, t_date = m_exp.groups()
+        if t_title and not t_title.lower().startswith('give'):
+            add_workspace_task(t_title.strip(), t_date.strip() if t_date else None, priority="Normal", user_id=user_id, quiet=False)
+
 def auto_extract_memories(user_text, user_id="sidd"):
     text = user_text.strip()
     cleaned = re.sub(r'^(?:hi|hello|hey|yo|ok|okay)?\s*(?:jans)?\s*[,:]?\s*', '', text, flags=re.IGNORECASE).strip()
@@ -328,15 +482,29 @@ def stream_chat(host, messages):
 
 def print_help():
     print("""\x1b[1mJans Terminal Interface (CLI)\x1b[0m
-Direct socket connection to Jans AI with Real-Time Clock, Lifelong SQLite Memory & PDF RAG.
+Direct socket connection to Jans AI with Real-Time Clock, Lifelong SQLite Memory, Task Scheduling & PDF RAG.
 
 \x1b[1mUsage:\x1b[0m
   jans                          Start interactive conversational REPL
   jans "<query>"                Ask a single question and stream response
   cat <file> | jans "<task>"    Pipe file contents or logs directly into Jans
+
+\x1b[1mTask & Calendar Management:\x1b[0m
+  jans tasks                    List all scheduled tasks from SQLite
+  jans tasks --date <date>      List tasks for a specific date (e.g. 2026-11-19 or "19th nov")
+  jans task add "<title>"       Add a task (flags: --date <YYYY-MM-DD>, --priority High|Normal)
+  jans --task "<title>"         Quick shorthand to add a task
+
+\x1b[1mMemory & Knowledge:\x1b[0m
   jans --brain, -b              View all memories stored in Jans's SQLite brain
   jans --remember "<fact>"      Manually teach Jans a permanent fact
   jans --help, -h               Show this help message
+
+\x1b[1mConversational Task & Memory Detection:\x1b[0m
+  During chat, Jans automatically schedules tasks and remembers facts when you say:
+  - "my web development exam is on 19th nov and my dsa exam is on 21st"
+  - "give 1hr to physics on 19th nov and 1hr to maths on 20th nov"
+  - "add task: Review OS scheduler on 18th nov"
 
 \x1b[1mEnvironment Variables:\x1b[0m
   JANS_URL                      Override Ollama host (default: autodetect fedora/localhost)
@@ -362,6 +530,64 @@ def main():
         else:
             print("Usage: jans --remember '<fact to remember>'")
             return
+
+    # Task CLI commands (run offline, directly against SQLite)
+    argv_lower = [a.lower() for a in sys.argv]
+
+    is_task_cmd = False
+    if len(sys.argv) > 1 and sys.argv[1].lower() in ("tasks", "task"):
+        is_task_cmd = True
+    elif "--tasks" in argv_lower or "-t" in argv_lower or "--task" in argv_lower or "--add-task" in argv_lower:
+        is_task_cmd = True
+
+    if is_task_cmd:
+        is_add = ("--task" in sys.argv or "--add-task" in sys.argv or
+                  (len(sys.argv) > 2 and sys.argv[1].lower() == "task" and sys.argv[2].lower() == "add"))
+        if is_add:
+            title = ""
+            date_str = None
+            priority = "Normal"
+
+            i = 1
+            while i < len(sys.argv):
+                arg = sys.argv[i]
+                if arg in ("--task", "--add-task"):
+                    if i + 1 < len(sys.argv) and not sys.argv[i+1].startswith("--"):
+                        title = sys.argv[i+1]
+                        i += 1
+                elif arg.lower() == "task" and i + 1 < len(sys.argv) and sys.argv[i+1].lower() == "add":
+                    if i + 2 < len(sys.argv) and not sys.argv[i+2].startswith("--"):
+                        title = sys.argv[i+2]
+                        i += 2
+                    else:
+                        i += 1
+                elif arg == "--date":
+                    if i + 1 < len(sys.argv):
+                        date_str = sys.argv[i+1]
+                        i += 1
+                elif arg in ("--priority", "-p"):
+                    if i + 1 < len(sys.argv):
+                        priority = sys.argv[i+1].title()
+                        i += 1
+                i += 1
+
+            if not title:
+                print("Usage: jans task add '<task title>' [--date YYYY-MM-DD] [--priority High|Normal]")
+                return
+
+            add_workspace_task(title, date_str=date_str, priority=priority, quiet=False)
+            return
+
+        # Otherwise it's a list command
+        filter_date = None
+        if "--date" in sys.argv:
+            d_idx = sys.argv.index("--date")
+            if d_idx + 1 < len(sys.argv):
+                filter_date = sys.argv[d_idx + 1]
+        elif len(sys.argv) > 2 and sys.argv[1].lower() in ("tasks", "task") and sys.argv[2].lower() not in ("list", "ls") and not sys.argv[2].startswith("-"):
+            filter_date = sys.argv[2]
+        list_workspace_tasks(filter_date=filter_date)
+        return
 
     host = find_active_host()
     if not host:
@@ -392,6 +618,7 @@ def main():
             prompt_content = user_text
 
         auto_extract_memories(prompt_content)
+        auto_extract_tasks(prompt_content)
         doc_context = find_document_context(prompt_content)
         mem_context = find_memory_context(prompt_content)
         temporal_context = get_temporal_context()
@@ -404,7 +631,7 @@ def main():
 
     # 2. Interactive REPL Mode
     print(f"\x1b[1mJans Terminal Console\x1b[0m · Connected to \x1b[32m{host}\x1b[0m ({MODEL_NAME})")
-    print("Type your message, or 'exit' / Ctrl+C to quit. (Tip: jans --brain to inspect memory)\n")
+    print("Type your message, or 'exit' / Ctrl+C to quit. (Tip: jans --brain to inspect memory, jans tasks to view queue)\n")
 
     history = [{"role": "system", "content": SYSTEM_PROMPT}]
 
@@ -419,8 +646,12 @@ def main():
             if user_input.lower() in ("brain", "--brain", "-b"):
                 print_memories()
                 continue
+            if user_input.lower() in ("tasks", "task list", "--tasks", "-t"):
+                list_workspace_tasks()
+                continue
 
             auto_extract_memories(user_input)
+            auto_extract_tasks(user_input)
             doc_context = find_document_context(user_input)
             mem_context = find_memory_context(user_input)
             temporal_context = get_temporal_context()
