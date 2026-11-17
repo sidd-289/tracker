@@ -376,6 +376,19 @@ function JansCharacter({ compact = false, level }: { compact?: boolean; level: n
   )
 }
 
+function sanitizeTasks(tasks: Task[]): Task[] {
+  if (!Array.isArray(tasks)) return []
+  const seenIds = new Set<string>()
+  return tasks.map((t, idx) => {
+    let id = t?.id
+    if (!id || seenIds.has(id)) {
+      id = `task-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 7)}`
+    }
+    seenIds.add(id)
+    return { ...t, id }
+  })
+}
+
 function useLocalStore() {
   const [currentUser, setCurrentUser] = useState<'sidd' | 'jahnavi'>('sidd')
   const [store, setStore] = useState<Store>(DEFAULT_STORE)
@@ -412,6 +425,7 @@ function useLocalStore() {
         setStore({
           ...DEFAULT_STORE,
           ...parsed,
+          tasks: sanitizeTasks(parsed.tasks || []),
           profiles: normalizeProfiles({
             ...DEFAULT_STORE.profiles,
             ...(parsed.profiles || {}),
@@ -432,6 +446,7 @@ function useLocalStore() {
           setStore((current) => ({
             ...current,
             ...data.state,
+            tasks: sanitizeTasks(data.state.tasks || current.tasks),
             profiles: normalizeProfiles({
               ...current.profiles,
               ...(data.state.profiles || {}),
@@ -452,6 +467,7 @@ function useLocalStore() {
             setStore((current) => ({
               ...current,
               ...data.state,
+              tasks: sanitizeTasks(data.state.tasks || current.tasks),
               profiles: normalizeProfiles({
                 ...current.profiles,
                 ...(data.state.profiles || {}),
@@ -594,7 +610,7 @@ export function DaybookApp() {
               tasks: [
                 ...current.tasks,
                 {
-                  id: `task-${Date.now()}`,
+                  id: `task-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
                   title: taskTitle,
                   done: false,
                   priority: 'Normal',
@@ -1262,7 +1278,7 @@ function TodayView({
     e.preventDefault()
     if (!quickTitle.trim()) return
     const newTask: Task = {
-      id: `task-${Date.now()}`,
+      id: `task-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       title: quickTitle.trim(),
       done: false,
       priority: quickPriority,
@@ -1628,7 +1644,7 @@ function TodayView({
             ) : (
               filteredTasks.map((task, index) => (
                 <div
-                  key={task.id}
+                  key={`${task.id || 'task'}-${index}`}
                   onClick={() =>
                     setStore((current) => ({
                       ...current,
