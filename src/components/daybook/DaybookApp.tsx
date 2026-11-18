@@ -232,6 +232,12 @@ function Icon({ name, size = 18 }: { name: string; size?: number }) {
       </>
     ),
     plus: <path d="M12 4v16M4 12h16" />,
+    download: (
+      <>
+        <path d="M12 3v12M7 11l5 5 5-5" />
+        <path d="M4 20h16" />
+      </>
+    ),
     arrow: <path d="m9 5 7 7-7 7" />,
     chevron: <path d="m6 9 6 6 6-6" />,
     copy: (
@@ -489,6 +495,46 @@ function useLocalStore() {
     }
   }, [currentUser])
 
+  const [isOnline, setIsOnline] = useState<boolean>(true)
+  const [pendingSync, setPendingSync] = useState<boolean>(false)
+
+  // Online / offline listeners & automatic offline mutation replay
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    setIsOnline(navigator.onLine)
+
+    function handleOnline() {
+      setIsOnline(true)
+      const storageKey = `jans-desk-v1-${currentUser}`
+      const saved = window.localStorage.getItem(storageKey)
+      if (saved) {
+        try {
+          const payload = JSON.parse(saved)
+          fetch(`/api/sync?user=${currentUser}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          })
+            .then((res) => {
+              if (res.ok) setPendingSync(false)
+            })
+            .catch(() => {})
+        } catch {}
+      }
+    }
+
+    function handleOffline() {
+      setIsOnline(false)
+    }
+
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [currentUser])
+
   // Save changes for this user
   useEffect(() => {
     if (!loaded) return
@@ -501,16 +547,64 @@ function useLocalStore() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(store),
-      }).catch(() => {})
+      })
+        .then((res) => {
+          if (res.ok) setPendingSync(false)
+        })
+        .catch(() => {
+          setPendingSync(true)
+        })
     }, 1200)
     return () => clearTimeout(timer)
   }, [loaded, store, currentUser])
 
-  return { store, setStore, loaded, currentUser, setCurrentUser }
+  return { store, setStore, loaded, currentUser, setCurrentUser, isOnline, pendingSync }
 }
 
 export function DaybookApp() {
-  const { store, setStore, currentUser, setCurrentUser } = useLocalStore()
+  const { store, setStore, currentUser, setCurrentUser, isOnline, pendingSync } = useLocalStore()
+  const [installPrompt, setInstallPrompt] = useState<any>(null)
+  const [isStandalone, setIsStandalone] = useState(false)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const isStandaloneMode =
+      window.matchMedia('(display-mode: standalone)').matches ||
+      (window.navigator as any).standalone === true
+    setIsStandalone(isStandaloneMode)
+
+    const handleBeforeInstall = (e: Event) => {
+      e.preventDefault()
+      setInstallPrompt(e)
+    }
+
+    const handleAppInstalled = () => {
+      setInstallPrompt(null)
+      setIsStandalone(true)
+    }
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstall)
+    window.addEventListener('appinstalled', handleAppInstalled)
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstall)
+      window.removeEventListener('appinstalled', handleAppInstalled)
+    }
+  }, [])
+
+  async function handleInstallApp() {
+    if (!installPrompt) return
+    try {
+      installPrompt.prompt()
+      const { outcome } = await installPrompt.userChoice
+      if (outcome === 'accepted') {
+        setInstallPrompt(null)
+      }
+    } catch (e) {
+      console.warn('Install prompt error:', e)
+    }
+  }
+
   const [active, setActive] = useState<Section>('Today')
   const [capture, setCapture] = useState<CaptureType | null>(null)
   const [query, setQuery] = useState('')
@@ -921,6 +1015,37 @@ export function DaybookApp() {
                 <span>JAHNAVI</span>
               </button>
             </div>
+
+            {/* Offline & Sync Status Pill */}
+            {!isOnline ? (
+              <span
+                className="flex items-center gap-1.5 border-2 border-[#20211f] bg-[#ffca3a] px-2.5 py-1 text-[10px] font-black uppercase text-[#20211f] shadow-[2px_2px_0_#20211f]"
+                title="Working offline: changes are saved locally and will auto-sync when connection returns"
+              >
+                <span className="h-2 w-2 rounded-full bg-[#e66b3c] animate-pulse" />
+                <span>OFFLINE</span>
+              </span>
+            ) : pendingSync ? (
+              <span
+                className="flex items-center gap-1.5 border-2 border-[#20211f] bg-white px-2 py-1 text-[9px] font-mono font-bold uppercase text-[#596057] shadow-[2px_2px_0_#20211f]"
+                title="Local changes pending sync"
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-[#f3b438] animate-ping" />
+                <span className="hidden sm:inline">SYNCING</span>
+              </span>
+            ) : null}
+
+            {/* In-App PWA Install Button (macOS, Windows, Android) */}
+            {installPrompt && !isStandalone && (
+              <button
+                onClick={handleInstallApp}
+                className="flex h-10 items-center gap-1.5 border-2 border-[#20211f] bg-white px-3 text-[11px] font-black uppercase text-[#20211f] shadow-[3px_3px_0_#20211f] transition hover:bg-[#ffca3a] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none"
+                title="Install Jans Desk as a standalone app on your Mac Dock, Windows Taskbar, or Android Home Screen"
+              >
+                <Icon name="download" size={15} />
+                <span className="hidden md:inline">INSTALL APP</span>
+              </button>
+            )}
 
             <button
               onClick={() => setCapture('Note')}

@@ -1,0 +1,59 @@
+{
+  "id": "/?source=pwa",
+  "name": "Jans Desk",
+  "short_name": "Jans",
+  "description": "Calm personal operating system, Daybook, college timetable, task matrix, and Jans AI companion.",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f3efe3",
+  "theme_color": "#f3efe3",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["productivity", "education", "utilities"],
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Today Plan",
+      "short_name": "Today",
+      "description": "Open today's tasks and morning brief",
+      "url": "/?view=today",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "College Timetable",
+      "short_name": "Timetable",
+      "description": "Check MSOT class schedule and lectures",
+      "url": "/?view=timetable",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Jans AI Companion",
+      "short_name": "Jans AI",
+      "description": "Chat with Jans and review memories",
+      "url": "/?view=jans",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    }
+  ],
+  "prefer_related_applications": false
+}
