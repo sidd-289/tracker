@@ -1,10 +1,12 @@
-// Jans Desk Service Worker - v1.0.0
-// High-performance offline caching and background proxy
-const CACHE_NAME = 'jans-cache-v1';
+// Jans Desk Service Worker - v2.0.0
+// Offline-first PWA proxy & proactive asset precaching
+const CACHE_NAME = 'jans-cache-v2';
 
-const STATIC_PRECACHE = [
+const CORE_ASSETS = [
   '/',
+  '/?source=pwa',
   '/manifest.webmanifest',
+  '/manifest.json',
   '/icon-192.png',
   '/icon-512.png',
   '/icon-maskable-512.png',
@@ -13,14 +15,42 @@ const STATIC_PRECACHE = [
   '/favicon.png',
 ];
 
-// 1. Install Phase: Cache App Shell
+// 1. Install Phase: Cache App Shell & parse subresources
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(STATIC_PRECACHE);
-    }).then(() => {
-      return self.skipWaiting();
-    })
+    caches.open(CACHE_NAME).then(async (cache) => {
+      // Precache known static assets
+      await cache.addAll(CORE_ASSETS);
+
+      // Pre-fetch HTML shell and proactively discover and cache CSS / JS chunks
+      try {
+        const pageRes = await fetch('/');
+        if (pageRes && pageRes.ok) {
+          const html = await pageRes.clone().text();
+          await cache.put('/', pageRes.clone());
+          await cache.put('/?source=pwa', pageRes.clone());
+
+          const subresources = [];
+          const regex = /(?:src|href)=["'](\/_next\/static\/[^"']+)["']/g;
+          let match;
+          while ((match = regex.exec(html)) !== null) {
+            subresources.push(match[1]);
+          }
+
+          if (subresources.length > 0) {
+            await Promise.allSettled(
+              subresources.map((url) =>
+                fetch(url)
+                  .then((res) => (res.ok ? cache.put(url, res) : null))
+                  .catch(() => {})
+              )
+            );
+          }
+        }
+      } catch (err) {
+        console.warn('[SW] Pre-caching HTML subresources:', err);
+      }
+    }).then(() => self.skipWaiting())
   );
 });
 
@@ -31,13 +61,12 @@ self.addEventListener('activate', (event) => {
       return Promise.all(
         cacheNames.map((name) => {
           if (name !== CACHE_NAME) {
+            console.log('[SW] Evicting old cache generation:', name);
             return caches.delete(name);
           }
         })
       );
-    }).then(() => {
-      return self.clients.claim();
-    })
+    }).then(() => self.clients.claim())
   );
 });
 
@@ -46,32 +75,41 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Ignore non-GET requests (e.g. POST /api/sync should go straight to network)
+  // Ignore non-GET requests (e.g. POST /api/sync)
   if (request.method !== 'GET') {
     return;
   }
 
-  // A. Navigation requests (Opening the page)
+  // A. Navigation requests (Opening or refreshing the app)
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request)
         .then((networkResponse) => {
-          // Update cache with latest HTML shell
           if (networkResponse && networkResponse.status === 200) {
-            const responseClone = networkResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, responseClone));
+            const clone = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(request, clone);
+              cache.put('/', clone);
+              cache.put('/?source=pwa', clone);
+            });
           }
           return networkResponse;
         })
         .catch(async () => {
-          // Offline fallback: serve cached page
-          const cachedResponse = await caches.match(request);
-          if (cachedResponse) return cachedResponse;
-          const rootCached = await caches.match('/');
+          // OFFLINE FALLBACK: Ignore query params (?source=pwa)
+          const cachedRequest = await caches.match(request, { ignoreSearch: true });
+          if (cachedRequest) return cachedRequest;
+
+          const rootCached = await caches.match('/', { ignoreSearch: true });
           if (rootCached) return rootCached;
-          return new Response('Jans Desk is currently offline.', {
-            headers: { 'Content-Type': 'text/plain' },
-          });
+
+          const pwaCached = await caches.match('/?source=pwa', { ignoreSearch: true });
+          if (pwaCached) return pwaCached;
+
+          return new Response(
+            '<!DOCTYPE html><html><body style="background:#f3efe3;font-family:monospace;padding:2rem;"><h2>Jans Desk Offline</h2><p>Please connect to the network to refresh.</p></body></html>',
+            { headers: { 'Content-Type': 'text/html' } }
+          );
         })
     );
     return;
@@ -83,12 +121,12 @@ self.addEventListener('fetch', (event) => {
     url.pathname.match(/\.(png|jpg|jpeg|svg|webp|woff2|css|js)$/)
   ) {
     event.respondWith(
-      caches.match(request).then((cachedResponse) => {
+      caches.match(request, { ignoreSearch: true }).then((cachedResponse) => {
         const fetchPromise = fetch(request)
           .then((networkResponse) => {
             if (networkResponse && networkResponse.status === 200) {
-              const responseClone = networkResponse.clone();
-              caches.open(CACHE_NAME).then((cache) => cache.put(request, responseClone));
+              const clone = networkResponse.clone();
+              caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
             }
             return networkResponse;
           })
@@ -106,13 +144,13 @@ self.addEventListener('fetch', (event) => {
       fetch(request)
         .then((networkResponse) => {
           if (networkResponse && networkResponse.status === 200) {
-            const responseClone = networkResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, responseClone));
+            const clone = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
           }
           return networkResponse;
         })
         .catch(async () => {
-          const cached = await caches.match(request);
+          const cached = await caches.match(request, { ignoreSearch: true });
           if (cached) return cached;
           return new Response(JSON.stringify({ offline: true, error: 'Network unavailable' }), {
             headers: { 'Content-Type': 'application/json' },
@@ -123,14 +161,12 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Default: Network with Cache Fallback
+  // Default: Cache with Network Fallback
   event.respondWith(
-    caches.match(request).then((cachedResponse) => {
+    caches.match(request, { ignoreSearch: true }).then((cachedResponse) => {
       return (
         cachedResponse ||
-        fetch(request).catch(() => {
-          return new Response('', { status: 408 });
-        })
+        fetch(request).catch(() => new Response('', { status: 408 }))
       );
     })
   );
